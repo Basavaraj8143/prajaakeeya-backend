@@ -6,8 +6,6 @@ import {
   Query,
   Res,
   UseGuards,
-  UseInterceptors,
-  UploadedFile,
 } from "@nestjs/common";
 import type { Response } from "express";
 import {
@@ -17,15 +15,10 @@ import {
   ApiBearerAuth,
   ApiQuery,
 } from "@nestjs/swagger";
-import { FileInterceptor } from "@nestjs/platform-express";
 import { AuthService } from "./auth.service";
 import { LoginDto } from "./dto/login.dto";
 import { AdminSeedDto } from "./dto/admin-seed.dto";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
-import { RegisterVoterDto } from "./dto/register-voter.dto";
-import { GoogleLoginDto } from "./dto/google-login.dto";
-import { GoogleRegisterDto } from "./dto/google-register.dto";
-import { AppleLoginDto } from "./dto/apple-login.dto";
 import { AspirantSendOtpDto } from "./dto/aspirant-send-otp.dto";
 import { AspirantVerifyOtpDto } from "./dto/aspirant-verify-otp.dto";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
@@ -81,18 +74,6 @@ export class AuthController {
   //   return this.authService.seedAdmin(dto.email!, dto.name, dto.password);
   // }
 
-  @Post("register-voter")
-  @ApiOperation({
-    summary: "Register a new voter",
-    description: "Register a new voter with name and email.",
-  })
-  @ApiResponse({ status: 201, description: "Voter registered successfully" })
-  @ApiResponse({ status: 400, description: "Validation error" })
-  @ApiResponse({ status: 409, description: "Email already registered" })
-  registerVoter(@Body() dto: RegisterVoterDto) {
-    return this.authService.registerVoter(dto);
-  }
-
   @Get("google")
   @ApiOperation({
     summary: "Initiate Google OAuth 2.0 Authorization Code flow",
@@ -126,85 +107,6 @@ export class AuthController {
     }
     const { redirectUrl } = await this.authService.handleGoogleCallback(code);
     return res.redirect(redirectUrl);
-  }
-
-  @Post("google/login")
-  @ApiOperation({
-    summary: "Login with Google Firebase token",
-    description:
-      "Authenticate user using Google Sign-In via Firebase. Requires Firebase ID token obtained from client-side Google authentication.",
-  })
-  @ApiResponse({
-    status: 201,
-    description: "Login successful, JWT token returned",
-  })
-  @ApiResponse({
-    status: 401,
-    description: "Invalid Firebase token or unauthorized",
-  })
-  @ApiResponse({ status: 404, description: "User not registered" })
-  googleLogin(@Body() dto: GoogleLoginDto) {
-    return this.authService.googleLogin(dto);
-  }
-
-  @Post("google/admin/login")
-  @ApiOperation({
-    summary: "Admin login with Google Firebase token",
-    description:
-      "Authenticate admin user using Google Sign-In via Firebase. Requires Firebase ID token obtained from client-side Google authentication.",
-  })
-  @ApiResponse({
-    status: 201,
-    description: "Admin login successful, JWT token returned",
-  })
-  @ApiResponse({
-    status: 401,
-    description: "Invalid Firebase token or not an admin",
-  })
-  googleAdminLogin(@Body() dto: GoogleLoginDto) {
-    return this.authService.googleAdminLogin(dto);
-  }
-
-  @Post("apple/login")
-  @ApiOperation({
-    summary: "Login with Apple Firebase token",
-    description:
-      "Authenticate user using Apple Sign-In via Firebase. Requires Firebase ID token obtained from client-side Apple authentication.",
-  })
-  @ApiResponse({
-    status: 201,
-    description: "Login successful, JWT token returned",
-  })
-  @ApiResponse({
-    status: 401,
-    description: "Invalid Firebase token or unauthorized",
-  })
-  @ApiResponse({ status: 404, description: "User not registered" })
-  appleLogin(@Body() dto: AppleLoginDto) {
-    return this.authService.appleLogin(dto);
-  }
-
-  @Post("google/register")
-  @UseInterceptors(FileInterceptor("profilePicture"))
-  @ApiOperation({
-    summary: "Register new voter with Google authentication",
-    description:
-      "Register a new voter using Google Sign-In via Firebase. Step 1: Call with idToken and epicNumber to fetch voter details. Step 2: Call with idToken, epicNumber, confirm=true and optional profilePicture to complete registration.",
-  })
-  @ApiResponse({
-    status: 201,
-    description: "Voter details fetched or registration completed",
-  })
-  @ApiResponse({
-    status: 400,
-    description: "Validation error or user already registered",
-  })
-  @ApiResponse({ status: 401, description: "Invalid Firebase token" })
-  googleRegister(
-    @Body() dto: GoogleRegisterDto,
-    @UploadedFile() profilePicture?: Express.Multer.File,
-  ) {
-    return this.authService.googleRegister(dto, profilePicture);
   }
 
   @Get("me")
