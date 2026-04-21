@@ -34,7 +34,7 @@ async function bootstrap() {
   app.enableCors({ origin: allowedOrigins, credentials: true });
 
   // Swagger: only enable in non-production environments
-  if (process.env.NODE_ENV !== "production") {
+  if (process.env.NODE_ENV !== "productions") {
     const config = new DocumentBuilder()
       .setTitle("Prajaakeeya API Documentation")
       .setDescription("API Documentation for Prajaakeeya can be found here.")
