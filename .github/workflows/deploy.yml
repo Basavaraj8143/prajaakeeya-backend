@@ -70,7 +70,7 @@ jobs:
       - production
     environment: production
     env:
-      APP_DIR: /home/deploy/apps/prajaakeeya-api
+      APP_DIR: /home/ec2-user/prajaakeeya-api
       PM2_NAME: prajaakeeya-api
 
     steps:
@@ -93,20 +93,28 @@ jobs:
         run: |
           set -euo pipefail
 
-          mkdir -p "$APP_DIR"
+          sudo -n mkdir -p "$APP_DIR"
+          sudo -n chown -R ec2-user:ec2-user "$APP_DIR"
 
-          rm -rf "$APP_DIR/dist"
-          cp -r dist "$APP_DIR/"
-          cp package.json package-lock.json "$APP_DIR/"
+          sudo -n -u ec2-user rm -rf "$APP_DIR/dist"
+          sudo -n -u ec2-user cp -r dist "$APP_DIR/"
+          sudo -n -u ec2-user cp package.json package-lock.json "$APP_DIR/"
 
-          (cd "$APP_DIR" && npm ci --omit=dev)
+          sudo -n -u ec2-user bash -lc '
+            set -euo pipefail
+            export PATH="$HOME/.nvm/versions/node/v24.14.0/bin:$HOME/.local/bin:/usr/local/bin:/usr/bin:$PATH"
+            cd "'$APP_DIR'"
+            npm ci --omit=dev
 
-          export PATH="$HOME/.local/bin:$PATH"
-          if ! command -v pm2 >/dev/null 2>&1; then
-            npm config set prefix "$HOME/.local"
-            npm i -g pm2
-          fi
+            if ! command -v pm2 >/dev/null 2>&1; then
+              npm config set prefix "$HOME/.local"
+              npm i -g pm2
+              export PATH="$HOME/.local/bin:$PATH"
+            fi
 
-          (cd "$APP_DIR" && pm2 describe "$PM2_NAME" >/dev/null 2>&1 && pm2 restart "$PM2_NAME" --update-env || pm2 start dist/main.js --name "$PM2_NAME")
+            pm2 describe "'$PM2_NAME'" >/dev/null 2>&1 \
+              && pm2 restart "'$PM2_NAME'" --update-env \
+              || pm2 start dist/main.js --name "'$PM2_NAME'"
 
-          pm2 save
+            pm2 save
+          '
