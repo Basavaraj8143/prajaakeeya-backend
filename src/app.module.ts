@@ -3,6 +3,10 @@ import { APP_GUARD } from "@nestjs/core";
 import { ConfigModule } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
+import { ThrottlerStorageRedisService } from "@nest-lab/throttler-storage-redis";
+import { CacheModule } from "@nestjs/cache-manager";
+import { createKeyv } from "@keyv/redis";
+import Redis from "ioredis";
 
 import * as fs from "fs";
 
@@ -60,19 +64,50 @@ import { Election } from "./elections/election.entity";
 import { GramaPanchayatModule } from "./grama-panchayat/grama-panchayat.module";
 import { GramaPanchayat } from "./grama-panchayat/grama-panchayat.entity";
 
+// Build a Redis connection URL from REDIS_HOST + REDIS_PORT. Returns undefined
+// when REDIS_HOST is not set, so callers fall back to in-memory storage.
+function resolveRedisUrl(): string | undefined {
+  const host = process.env.REDIS_HOST;
+  if (!host) return undefined;
+  const port = process.env.REDIS_PORT || "6379";
+  return `redis://${host}:${port}`;
+}
+
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate }),
 
-    // Global rate limiting: configurable via env vars THROTTLE_TTL and THROTTLE_LIMIT
-    // Default: 100 requests per 60 seconds (bot protection)
-    // Set THROTTLE_LIMIT=999 for testing (disable) or adjust THROTTLE_TTL/THROTTLE_LIMIT as needed
-    ThrottlerModule.forRoot([
-      {
-        ttl: parseInt(process.env.THROTTLE_TTL || "60000"),
-        limit: parseInt(process.env.THROTTLE_LIMIT || "200"),
+    // Global rate limiting: configurable via env vars THROTTLE_TTL and THROTTLE_LIMIT.
+    // Default: 200 requests per 60 seconds (bot protection).
+    // When REDIS_HOST is set, throttle counters live in Redis so limits are
+    // shared across EC2 instances. Otherwise falls back to in-memory storage.
+    ThrottlerModule.forRootAsync({
+      useFactory: () => {
+        const ttl = parseInt(process.env.THROTTLE_TTL || "60000");
+        const limit = parseInt(process.env.THROTTLE_LIMIT || "200");
+        const redisUrl = resolveRedisUrl();
+        return {
+          throttlers: [{ ttl, limit }],
+          storage: redisUrl
+            ? new ThrottlerStorageRedisService(new Redis(redisUrl))
+            : undefined,
+        };
       },
-    ]),
+    }),
+
+    // Global cache backed by Redis (Keyv adapter).
+    // Falls back to in-memory if Redis is not configured.
+    CacheModule.registerAsync({
+      isGlobal: true,
+      useFactory: () => {
+        const ttl = parseInt(process.env.CACHE_TTL_MS || "60000");
+        const redisUrl = resolveRedisUrl();
+        return {
+          ttl,
+          stores: redisUrl ? [createKeyv(redisUrl)] : undefined,
+        };
+      },
+    }),
 
     TypeOrmModule.forRoot({
       type: "postgres",

@@ -1,6 +1,5 @@
 import {
   BadRequestException,
-  ConflictException,
   ForbiddenException,
   Injectable,
   NotFoundException,
@@ -23,20 +22,14 @@ import { AssemblyService } from "../geography/assembly.service";
 import { GramaPanchayatService } from "../grama-panchayat/grama-panchayat.service";
 import { SESService } from "../common/services/ses.service";
 import { S3Service } from "../common/services/s3.service";
-import { FirebaseService } from "../common/services/firebase.service";
 import { MessageCentralService } from "../common/services/message-central.service";
 import { LoginDto } from "./dto/login.dto";
 import { VerifyOtpDto } from "./dto/verify-otp.dto";
-import { RegisterVoterDto } from "./dto/register-voter.dto";
-import { GoogleLoginDto } from "./dto/google-login.dto";
-import { GoogleRegisterDto } from "./dto/google-register.dto";
-import { AppleLoginDto } from "./dto/apple-login.dto";
 import { AspirantSendOtpDto } from "./dto/aspirant-send-otp.dto";
 import { AspirantVerifyOtpDto } from "./dto/aspirant-verify-otp.dto";
 import { Otp } from "./otp.entity";
 import { User } from "../users/user.entity";
 import axios from "axios";
-import * as https from "https";
 
 @Injectable()
 export class AuthService implements OnModuleInit, OnModuleDestroy {
@@ -53,7 +46,6 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     private readonly votesService: VotesService,
     private readonly sesService: SESService,
     private readonly s3Service: S3Service,
-    private readonly firebaseService: FirebaseService,
     private readonly messageCentralService: MessageCentralService,
     private readonly electionsService: ElectionsService,
     private readonly parliamentaryService: ParliamentaryService,
@@ -168,7 +160,6 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     if (user && (user.isSelfDeleted || (user.isBlocked && user.name === "Deleted User"))) {
       const reactivated = await this.usersService.reactivateAccount(email, {
         name: profile.name,
-        profilePicture: profile.picture,
         role: "voter",
       } as any);
       if (reactivated) user = reactivated;
@@ -176,7 +167,6 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       user = await this.usersService.create({
         email,
         name: profile.name || email.split("@")[0],
-        profilePicture: profile.picture,
         role: "voter",
       } as any);
     }
@@ -725,399 +715,6 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     return result;
   }
 
-  async registerVoter(dto: RegisterVoterDto) {
-    // Verify Firebase token to get authenticated email
-    const decodedToken = await this.firebaseService.verifyIdToken(dto.idToken);
-    const email = decodedToken.email;
-    if (!email) {
-      throw new BadRequestException("Email not provided by Google Sign-In");
-    }
-
-    // Only allow Gmail accounts
-    const domain = email.split("@")[1]?.toLowerCase();
-    if (domain !== "gmail.com") {
-      throw new BadRequestException(
-        "Only Gmail accounts are allowed for registration",
-      );
-    }
-
-    // Check email uniqueness
-    const existingByEmail = await this.usersService.findByEmail(email);
-    if (existingByEmail) {
-      const canReRegister =
-        existingByEmail.isSelfDeleted ||
-        (existingByEmail.isBlocked && existingByEmail.name === "Deleted User");
-      if (canReRegister) {
-        // Reactivate the old account with same ID
-        const reactivated = await this.usersService.reactivateAccount(email, {
-          name: dto.name,
-          role: "voter",
-        } as any);
-        if (!reactivated) {
-          throw new BadRequestException(
-            "Failed to reactivate account. Please try again.",
-          );
-        }
-        const payload = { sub: reactivated.id };
-        return {
-          token: await this.jwtService.signAsync(payload),
-          user: reactivated,
-        };
-      }
-      if (existingByEmail.isBlocked) {
-        throw new ForbiddenException(
-          "Your account has been blocked by an admin. Please contact support.",
-        );
-      }
-      throw new ConflictException("Email is already registered");
-    }
-
-    // Create voter user (no ward assignment — voters have access to all wards)
-    const user = await this.usersService.create({
-      name: dto.name,
-      email,
-      role: "voter",
-    } as any);
-
-    const payload = { sub: user.id };
-    return {
-      token: await this.jwtService.signAsync(payload),
-      user,
-    };
-  }
-
-  async googleLogin(googleLoginDto: GoogleLoginDto) {
-    // Verify Firebase token
-    const decodedToken = await this.firebaseService.verifyIdToken(
-      googleLoginDto.idToken,
-    );
-
-    const email = decodedToken.email;
-    if (!email) {
-      throw new UnauthorizedException("Email not provided by Google");
-    }
-
-    // Check if user exists
-    const user = await this.usersService.findByEmail(email);
-    if (!user || user.isSelfDeleted) {
-      throw new NotFoundException(
-        "User not registered. Please register first.",
-      );
-    }
-
-    if (user.isBlocked) {
-      throw new ForbiddenException(
-        "Your account has been blocked. Please contact support.",
-      );
-    }
-
-    // Prevent admin users from using the regular voter login endpoint
-    if (String(user.role) === "admin") {
-      throw new UnauthorizedException("Admin must use admin login endpoint");
-    }
-
-    const payload = { sub: user.id };
-
-    // Attach ward details when available
-    let userWithWard: any = user;
-    if (user.wardId) {
-      try {
-        const ward = await this.wardsService.findOne(user.wardId);
-        userWithWard = {
-          ...user,
-          wardNumber: ward.number,
-          state: ward.state,
-          parliamentary: ward.parliamentary,
-          assembly: ward.assembly,
-        };
-        // If user is an aspirant, attach aspirantId when possible
-        if (String(user.role) === "aspirant") {
-          try {
-            const aspirant = await this.aspirantsService.findByUserId(user.id);
-            if (aspirant) userWithWard.aspirantId = aspirant.id;
-          } catch (e) {
-            // ignore lookup errors
-          }
-        }
-      } catch (e) {
-        // ignore if ward not found
-      }
-    }
-
-    return {
-      token: await this.jwtService.signAsync(payload),
-      user: userWithWard,
-    };
-  }
-
-  async appleLogin(appleLoginDto: AppleLoginDto) {
-    // Verify Firebase token (Apple Sign-In token via Firebase)
-    const decodedToken = await this.firebaseService.verifyIdToken(
-      appleLoginDto.idToken,
-    );
-
-    const email = decodedToken.email;
-    if (!email) {
-      throw new UnauthorizedException("Email not provided by Apple");
-    }
-
-    // Check if user exists
-    const user = await this.usersService.findByEmail(email);
-    if (!user || user.isSelfDeleted) {
-      throw new NotFoundException(
-        "User not registered. Please register first.",
-      );
-    }
-
-    if (user.isBlocked) {
-      throw new ForbiddenException(
-        "Your account has been blocked. Please contact support.",
-      );
-    }
-
-    // Prevent admin users from using the regular voter login endpoint
-    if (String(user.role) === "admin") {
-      throw new UnauthorizedException("Admin must use admin login endpoint");
-    }
-
-    const payload = { sub: user.id };
-
-    // Attach ward details when available
-    let userWithWard: any = user;
-    if (user.wardId) {
-      try {
-        const ward = await this.wardsService.findOne(user.wardId);
-        userWithWard = {
-          ...user,
-          wardNumber: ward.number,
-          state: ward.state,
-          parliamentary: ward.parliamentary,
-          assembly: ward.assembly,
-        };
-        if (String(user.role) === "aspirant") {
-          try {
-            const aspirant = await this.aspirantsService.findByUserId(user.id);
-            if (aspirant) userWithWard.aspirantId = aspirant.id;
-          } catch (e) {
-            // ignore lookup errors
-          }
-        }
-      } catch (e) {
-        // ignore if ward not found
-      }
-    }
-
-    return {
-      token: await this.jwtService.signAsync(payload),
-      user: userWithWard,
-    };
-  }
-
-  async googleAdminLogin(googleLoginDto: GoogleLoginDto) {
-    // Verify Firebase token
-    const decodedToken = await this.firebaseService.verifyIdToken(
-      googleLoginDto.idToken,
-    );
-
-    const email = decodedToken.email;
-    if (!email) {
-      throw new UnauthorizedException("Email not provided by Google");
-    }
-
-    // Check if user exists and is admin
-    const user = await this.usersService.findByEmail(email);
-    if (!user || user.role !== "admin") {
-      throw new UnauthorizedException("Admin not registered");
-    }
-
-    const payload = { sub: user.id };
-    return { token: await this.jwtService.signAsync(payload), user };
-  }
-
-  async googleRegister(
-    googleRegisterDto: GoogleRegisterDto,
-    profilePicture?: Express.Multer.File,
-  ) {
-    // Verify Firebase token
-    const decodedToken = await this.firebaseService.verifyIdToken(
-      googleRegisterDto.idToken,
-    );
-
-    const email = decodedToken.email;
-    if (!email) {
-      throw new UnauthorizedException("Email not provided by Google");
-    }
-
-    // Check if user already exists
-    const existingUser = await this.usersService.findByEmail(email);
-    if (existingUser) {
-      const canReRegister =
-        existingUser.isSelfDeleted ||
-        (existingUser.isBlocked && existingUser.name === "Deleted User");
-      if (!canReRegister) {
-        if (existingUser.isBlocked) {
-          throw new ForbiddenException(
-            "Your account has been blocked by an admin. Please contact support.",
-          );
-        }
-        throw new BadRequestException(
-          "User already registered. Please login instead.",
-        );
-      }
-    }
-
-    // Call external electoral API
-    let voterData: any;
-    try {
-      const response = await axios.post(
-        "https://electoralapi.bbmpgov.in/searchby-epic",
-        { epic_no: googleRegisterDto.epicNumber },
-        {
-          headers: {
-            "Content-Type": "application/json",
-          },
-          timeout: 10000,
-          httpsAgent: new https.Agent({
-            rejectUnauthorized: false,
-          }),
-        },
-      );
-      voterData = response.data;
-      console.log("Electoral API Response:", voterData);
-    } catch (error: any) {
-      console.error("Electoral API Error:", {
-        message: error.message,
-        response: error.response?.data,
-        status: error.response?.status,
-        epic: googleRegisterDto.epicNumber,
-      });
-
-      const errorMessage =
-        error.response?.data?.message ||
-        error.response?.data?.error ||
-        error.message ||
-        "Failed to fetch voter details from electoral API";
-
-      throw new BadRequestException({
-        message: errorMessage,
-        details: error.response?.data,
-        status: error.response?.status,
-      });
-    }
-
-    // Normalize electoral API response
-    const extractFirst = (d: any): any => {
-      if (d == null) return d;
-      if (Array.isArray(d)) return d[0];
-      if (d.data) return extractFirst(d.data);
-      return d;
-    };
-
-    const voter = extractFirst(voterData);
-
-    // If confirm=false or not provided, just return the voter data for review
-    if (!googleRegisterDto.confirm) {
-      return {
-        message:
-          "Voter details fetched. Please confirm to proceed with registration.",
-        voterDetails: voter,
-      };
-    }
-
-    // If confirm=true, proceed with registration
-    const wardNameFromApi = voter?.ward_name || voter?.ward_name_l1;
-    if (!wardNameFromApi) {
-      throw new BadRequestException("Ward name not provided by electoral API");
-    }
-
-    let ward;
-    try {
-      ward = await this.wardsService.findByName(wardNameFromApi);
-    } catch (error) {
-      throw new NotFoundException(
-        `Ward not found with name: ${wardNameFromApi}. Please ensure ward data is imported.`,
-      );
-    }
-
-    // Create user with electoral API data and Google info
-    const userData: any = {
-      email,
-      role: "voter",
-      wardId: ward.id,
-      voterEpic: voter?.voter_epic,
-      nameEn: voter?.name_en,
-      nameKn: voter?.name_kn,
-      corporationName: voter?.corporation_name,
-      corporationNameL1: voter?.corporation_name_l1,
-      wardName: voter?.ward_name,
-      wardNameL1: voter?.ward_name_l1,
-      psName: voter?.ps_name,
-      psNameL1: voter?.ps_name_l1,
-      psLong: voter?.ps_long ? parseFloat(String(voter.ps_long)) : undefined,
-      psLat: voter?.ps_lat ? parseFloat(String(voter.ps_lat)) : undefined,
-      // Keep legacy fields for backward compatibility
-      name: voter?.name_en || decodedToken.name,
-      epicId: voter?.voter_epic,
-      // Add profile picture from Google if not provided
-      profilePicture: decodedToken.picture,
-    };
-
-    // Block duplicate EPIC registrations (skip if it's the same blocked user)
-    const existingByEpic = await this.usersService.findByEpic(
-      voter?.voter_epic || googleRegisterDto.epicNumber,
-    );
-    const canReRegister =
-      existingUser &&
-      (existingUser.isSelfDeleted ||
-        (existingUser.isBlocked && existingUser.name === "Deleted User"));
-    if (
-      existingByEpic &&
-      !(canReRegister && existingByEpic.id === existingUser!.id)
-    ) {
-      throw new ConflictException(
-        "This EPIC ID is already registered. Please log in instead.",
-      );
-    }
-
-    // Reactivate blocked account or create new user
-    let user: User;
-    if (canReRegister) {
-      const reactivated = await this.usersService.reactivateAccount(
-        email,
-        userData,
-      );
-      user = reactivated!;
-    } else {
-      user = await this.usersService.create(userData);
-    }
-
-    // Override with uploaded profile picture if provided
-    if (profilePicture) {
-      const profilePictureUrl = await this.s3Service.uploadFile(
-        profilePicture,
-        `profiles/${user.id}`,
-      );
-      user.profilePicture = profilePictureUrl;
-      await this.usersService.updateUser(user.id, {
-        profilePicture: profilePictureUrl,
-      } as any);
-    }
-
-    // Generate JWT token
-    const payload = { sub: user.id };
-    const response: any = {
-      token: await this.jwtService.signAsync(payload),
-      user,
-      ward: {
-        id: ward.id,
-        number: ward.number,
-        state: ward.state,
-        parliamentary: ward.parliamentary,
-        assembly: ward.assembly,
-      },
-    };
-    return response;
-  }
 
   private async cleanupOtps() {
     const now = Date.now();

@@ -1,0 +1,112 @@
+name: Deploy
+
+on:
+  push:
+    branches:
+      - main
+      - staging
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  deploy-staging:
+    name: Build & Deploy (staging)
+    if: github.ref == 'refs/heads/staging'
+    runs-on:
+      - self-hosted
+      - ec2
+      - staging
+    environment: staging
+    env:
+      APP_DIR: /home/deploy/apps/prajaakeeya-api-staging
+      PM2_NAME: prajaakeeya-api-staging
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install build dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to EC2
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$APP_DIR"
+
+          rm -rf "$APP_DIR/dist"
+          cp -r dist "$APP_DIR/"
+          cp package.json package-lock.json "$APP_DIR/"
+
+          (cd "$APP_DIR" && npm ci --omit=dev)
+
+          export PATH="$HOME/.local/bin:$PATH"
+          if ! command -v pm2 >/dev/null 2>&1; then
+            npm config set prefix "$HOME/.local"
+            npm i -g pm2
+          fi
+
+          (cd "$APP_DIR" && pm2 describe "$PM2_NAME" >/dev/null 2>&1 && pm2 restart "$PM2_NAME" --update-env || pm2 start dist/main.js --name "$PM2_NAME")
+
+          pm2 save
+
+  deploy-production:
+    name: Build & Deploy (production)
+    if: github.ref == 'refs/heads/main'
+    runs-on:
+      - self-hosted
+      - ec2
+      - production
+    environment: production
+    env:
+      APP_DIR: /home/deploy/apps/prajaakeeya-api
+      PM2_NAME: prajaakeeya-api
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install build dependencies
+        run: npm ci
+
+      - name: Build
+        run: npm run build
+
+      - name: Deploy to EC2
+        run: |
+          set -euo pipefail
+
+          mkdir -p "$APP_DIR"
+
+          rm -rf "$APP_DIR/dist"
+          cp -r dist "$APP_DIR/"
+          cp package.json package-lock.json "$APP_DIR/"
+
+          (cd "$APP_DIR" && npm ci --omit=dev)
+
+          export PATH="$HOME/.local/bin:$PATH"
+          if ! command -v pm2 >/dev/null 2>&1; then
+            npm config set prefix "$HOME/.local"
+            npm i -g pm2
+          fi
+
+          (cd "$APP_DIR" && pm2 describe "$PM2_NAME" >/dev/null 2>&1 && pm2 restart "$PM2_NAME" --update-env || pm2 start dist/main.js --name "$PM2_NAME")
+
+          pm2 save

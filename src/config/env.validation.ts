@@ -28,18 +28,6 @@ class EnvironmentVariables {
 
   @IsString()
   @IsNotEmpty()
-  FIREBASE_PROJECT_ID!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  FIREBASE_PRIVATE_KEY!: string;
-
-  @IsString()
-  @IsNotEmpty()
-  FIREBASE_CLIENT_EMAIL!: string;
-
-  @IsString()
-  @IsNotEmpty()
   AWS_ACCESS_KEY_ID!: string;
 
   @IsString()
@@ -69,6 +57,14 @@ class EnvironmentVariables {
   @IsString()
   @IsOptional()
   GOOGLE_FRONTEND_REDIRECT_URI?: string;
+
+  @IsString()
+  @IsOptional()
+  REDIS_HOST?: string;
+
+  @IsString()
+  @IsOptional()
+  REDIS_PORT?: string;
 }
 
 export function validate(config: Record<string, unknown>) {

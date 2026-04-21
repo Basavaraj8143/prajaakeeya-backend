@@ -441,8 +441,16 @@ async function importAllWards() {
       const number = `${corp.prefix}-${i + 1}`;
       const name = strip(corp.wards[i]); // now actually using strip()
       await dataSource.query(
-        "INSERT INTO wards (number, name, zone, state, assembly, parliamentary) VALUES ($1, $2, $3, $4, $5, $6)",
-        [number, name, corp.name, "Karnataka", "TBD", "TBD"],
+        "INSERT INTO wards (number, name, zone, state, assembly, parliamentary, municipality) VALUES ($1, $2, $3, $4, $5, $6, $7)",
+        [
+          number,
+          name,
+          corp.name,
+          "Karnataka",
+          "TBD",
+          "TBD",
+          "Greater Bengaluru Authority(GBA) - Bengaluru",
+        ],
       );
       total++;
     }

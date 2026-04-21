@@ -23,32 +23,21 @@ async function bootstrap() {
   app.useGlobalInterceptors(new DateToTimestampInterceptor());
 
   // CORS: restrict origins based on environment
-  const allowedOrigins =
+  const corsEnv =
     process.env.NODE_ENV === "production"
-      ? [
-          "https://prajaakeeya.in",
-          "https://www.prajaakeeya.in",
-          "https://prajaakeeya.org",
-          "https://www.prajaakeeya.org",
-        ]
-      : [
-          "http://localhost:5173",
-          "https://main.d1kab1stclinb2.amplifyapp.com",
-          "https://prajaakeeya.in",
-          "https://www.prajaakeeya.in",
-          "https://lanch-dev.d1kab1stclinb2.amplifyapp.com",
-          "https://staging.d1kab1stclinb2.amplifyapp.com",
-          "https://staging.prajaakeeya.in",
-          "https://prajaakeeya.org",
-          "https://www.prajaakeeya.org",
-        ];
+      ? process.env.CORS_ALLOWED_ORIGINS_PROD
+      : process.env.CORS_ALLOWED_ORIGINS_DEV;
+  const allowedOrigins = (corsEnv ?? "")
+    .split(",")
+    .map((o) => o.trim())
+    .filter(Boolean);
   app.enableCors({ origin: allowedOrigins, credentials: true });
 
   // Swagger: only enable in non-production environments
   if (process.env.NODE_ENV !== "production") {
     const config = new DocumentBuilder()
-      .setTitle("Prajaakeeya API")
-      .setDescription("API for Prajaakeeya ward voter selection")
+      .setTitle("Prajaakeeya API Documentation")
+      .setDescription("API Documentation for Prajaakeeya can be found here.")
       .setVersion("2.0")
       .addBearerAuth()
       .build();
