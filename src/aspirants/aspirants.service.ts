@@ -988,6 +988,7 @@ export class AspirantsService {
 
     const data = aspirants.map((a) => ({
       id: a.id,
+      userId: a.userId ?? null,
       name: a.name,
       party: a.party,
       selfieUrl: a.selfieUrl ?? null,
