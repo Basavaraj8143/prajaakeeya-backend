@@ -67,12 +67,12 @@ export class AuthController {
     return this.authService.adminVerifyOtp(dto);
   }
 
-  // @Post('admin/seed')
-  // @ApiOperation({ summary: 'Seed initial admin user (create admin with password)' })
-  // @ApiResponse({ status: 201, description: 'Admin created successfully' })
-  // seedAdmin(@Body() dto: AdminSeedDto) {
-  //   return this.authService.seedAdmin(dto.email!, dto.name, dto.password);
-  // }
+  @Post('admin/seed')
+  @ApiOperation({ summary: 'Seed initial admin user (create admin with password)' })
+  @ApiResponse({ status: 201, description: 'Admin created successfully' })
+  seedAdmin(@Body() dto: AdminSeedDto) {
+    return this.authService.seedAdmin(dto.email!, dto.name, dto.password);
+  }
 
   @Get("google")
   @ApiOperation({

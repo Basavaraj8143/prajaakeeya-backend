@@ -574,7 +574,7 @@ export class AspirantsService {
 
     const aspirant = await this.repo.findOne({
       where: { id },
-      relations: { ward: true, meetings: { responses: true } } as any,
+      relations: { ward: true, user: true, meetings: { responses: true } } as any,
     });
     if (!aspirant) return null;
 
@@ -667,8 +667,10 @@ export class AspirantsService {
       }
     }
 
+    const { user: _user, ...aspirantRest } = aspirant as any;
     return {
-      ...aspirant,
+      ...aspirantRest,
+      isBlocked: aspirant.user?.isBlocked ?? false,
       electionName,
       constituencyName,
       meetings: mappedMeetings,
@@ -915,6 +917,7 @@ export class AspirantsService {
   ) {
     const qb = this.repo
       .createQueryBuilder("aspirant")
+      .leftJoinAndSelect("aspirant.user", "user")
       .where("aspirant.isActive = :isActive", { isActive: true })
       .andWhere("aspirant.sopUrl IS NOT NULL")
       .andWhere("aspirant.selfieUrl IS NOT NULL");
@@ -988,9 +991,11 @@ export class AspirantsService {
 
     const data = aspirants.map((a) => ({
       id: a.id,
+      userId: a.userId ?? null,
       name: a.name,
       party: a.party,
       selfieUrl: a.selfieUrl ?? null,
+      isBlocked: a.user?.isBlocked ?? false,
       electionId: a.electionId,
       electionName: a.electionId ? (electionMap[a.electionId] ?? null) : null,
       constituencyId: a.constituencyId,

@@ -199,6 +199,7 @@ export class UsersService {
         profilePicture: u.profilePicture,
         epicId: u.epicId,
         role: u.role,
+        isBlocked: u.isBlocked,
         wardId: u.wardId,
         nameEn: u.nameEn,
         nameKn: u.nameKn,

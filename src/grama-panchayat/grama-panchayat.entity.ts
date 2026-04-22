@@ -20,8 +20,8 @@ export class GramaPanchayat {
   @Column({ name: "Village Name" })
   villageName!: string;
 
-  @Column({ name: "Village Code" })
-  villageCode!: string;
+  @Column({ name: "Village Code", nullable: true })
+  villageCode?: string;
 
   @Column({ name: "Population", nullable: true })
   population?: string;

@@ -27,10 +27,10 @@ export class CreateGramaPanchayatDto {
   @IsNotEmpty()
   villageName!: string;
 
-  @ApiProperty({ example: "598748" })
+  @ApiPropertyOptional({ example: "598748" })
   @IsString()
-  @IsNotEmpty()
-  villageCode!: string;
+  @IsOptional()
+  villageCode?: string;
 
   @ApiPropertyOptional({ example: "5000" })
   @IsString()
