@@ -152,9 +152,11 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     let user = await this.usersService.findByEmail(email);
 
     if (user && user.isBlocked && user.name !== "Deleted User") {
-      throw new ForbiddenException(
-        "Your account has been blocked. Please contact support.",
-      );
+      const sep = frontendRedirect.includes("?") ? "&" : "?";
+      const errorMsg =
+        "Your account has been blocked. Please contact support.";
+      const redirectUrl = `${frontendRedirect}${sep}error=${encodeURIComponent(errorMsg)}`;
+      return { token: "", user, redirectUrl };
     }
 
     if (user && (user.isSelfDeleted || (user.isBlocked && user.name === "Deleted User"))) {
