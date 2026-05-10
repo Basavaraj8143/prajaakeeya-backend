@@ -528,6 +528,40 @@ export class UsersService {
     if (dto.isBlocked !== undefined) user.isBlocked = dto.isBlocked;
     if (dto.profilePicture !== undefined)
       user.profilePicture = dto.profilePicture;
+    if (dto.lokSabhaConstituencyId !== undefined)
+      user.lokSabhaConstituencyId = dto.lokSabhaConstituencyId;
+    if (dto.stateAssemblyConstituencyId !== undefined)
+      user.stateAssemblyConstituencyId = dto.stateAssemblyConstituencyId;
+    if (dto.municipalCorporationConstituencyId !== undefined)
+      user.municipalCorporationConstituencyId =
+        dto.municipalCorporationConstituencyId;
+    if (dto.gramPanchayatConstituencyId !== undefined)
+      user.gramPanchayatConstituencyId = dto.gramPanchayatConstituencyId;
+
+    return this.repo.save(user);
+  }
+
+  async updateConstituencies(
+    userId: number,
+    dto: {
+      lokSabhaConstituencyId?: number;
+      stateAssemblyConstituencyId?: number;
+      municipalCorporationConstituencyId?: number;
+      gramPanchayatConstituencyId?: number;
+    },
+  ): Promise<User> {
+    const user = await this.repo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException("User not found");
+
+    if (dto.lokSabhaConstituencyId !== undefined)
+      user.lokSabhaConstituencyId = dto.lokSabhaConstituencyId;
+    if (dto.stateAssemblyConstituencyId !== undefined)
+      user.stateAssemblyConstituencyId = dto.stateAssemblyConstituencyId;
+    if (dto.municipalCorporationConstituencyId !== undefined)
+      user.municipalCorporationConstituencyId =
+        dto.municipalCorporationConstituencyId;
+    if (dto.gramPanchayatConstituencyId !== undefined)
+      user.gramPanchayatConstituencyId = dto.gramPanchayatConstituencyId;
 
     return this.repo.save(user);
   }

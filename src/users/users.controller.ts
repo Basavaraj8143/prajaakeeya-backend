@@ -26,6 +26,7 @@ import { FileInterceptor } from "@nestjs/platform-express";
 import { UsersService } from "./users.service";
 import { CreateReportDto } from "./dto/create-report.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
+import { UpdateConstituenciesDto } from "./dto/update-constituencies.dto";
 import { TrackInteractionDto } from "./dto/track-interaction.dto";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 
@@ -218,6 +219,16 @@ export class UsersController {
     return { message };
   }
 
+  @Get("me")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({ summary: "Get current user profile" })
+  @ApiResponse({ status: 200, description: "User profile returned" })
+  @ApiResponse({ status: 401, description: "Unauthorized" })
+  async getMe(@Req() req: any) {
+    return this.usersService.getUserById(req.user.id);
+  }
+
   @Put("me")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
@@ -230,6 +241,10 @@ export class UsersController {
         phone: { type: "string" },
         gender: { type: "string" },
         age: { type: "number" },
+        lokSabhaConstituencyId: { type: "number" },
+        stateAssemblyConstituencyId: { type: "number" },
+        municipalCorporationConstituencyId: { type: "number" },
+        gramPanchayatConstituencyId: { type: "number" },
       },
     },
   })
@@ -243,7 +258,33 @@ export class UsersController {
     if (dto.phone !== undefined) allowed.phone = dto.phone;
     if (dto.gender !== undefined) allowed.gender = dto.gender;
     if ((dto as any).age !== undefined) allowed.age = (dto as any).age;
+    if (dto.lokSabhaConstituencyId !== undefined)
+      allowed.lokSabhaConstituencyId = dto.lokSabhaConstituencyId;
+    if (dto.stateAssemblyConstituencyId !== undefined)
+      allowed.stateAssemblyConstituencyId = dto.stateAssemblyConstituencyId;
+    if (dto.municipalCorporationConstituencyId !== undefined)
+      allowed.municipalCorporationConstituencyId =
+        dto.municipalCorporationConstituencyId;
+    if (dto.gramPanchayatConstituencyId !== undefined)
+      allowed.gramPanchayatConstituencyId = dto.gramPanchayatConstituencyId;
 
     return this.usersService.updateUser(userId, allowed);
+  }
+
+  @Post("me/constituencies")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary:
+      "Set current user's constituency IDs for the four election types (Lok Sabha, State Assembly, Municipal Corporation, Gram Panchayat)",
+  })
+  @ApiResponse({ status: 200, description: "Constituencies updated" })
+  @ApiResponse({ status: 401, description: "Unauthorized" })
+  async setConstituencies(
+    @Body() dto: UpdateConstituenciesDto,
+    @Req() req: any,
+  ) {
+    const userId = req.user?.id;
+    return this.usersService.updateConstituencies(userId, dto);
   }
 }
