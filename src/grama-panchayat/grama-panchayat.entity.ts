@@ -1,5 +1,6 @@
-import { Entity, Column, PrimaryColumn } from "typeorm";
+import { Entity, Column, PrimaryColumn, Index } from "typeorm";
 
+@Index("idx_gp_lookup", ["state", "district", "taluk", "gpName"])
 @Entity("grama_panchayat")
 export class GramaPanchayat {
   @PrimaryColumn({ name: "Sr.No", type: "bigint" })

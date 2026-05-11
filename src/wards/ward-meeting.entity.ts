@@ -1,5 +1,5 @@
 import { Column, Entity, ManyToOne, JoinColumn } from "typeorm";
-import { BaseEntity } from "../common/base.entity";
+import { BaseEntity, dateToEpoch } from "../common/base.entity";
 import { Ward } from "../wards/ward.entity";
 import { User } from "../users/user.entity";
 
@@ -21,8 +21,13 @@ export class WardMeeting extends BaseEntity {
   @Column({ name: "meeting_link", type: "text" })
   meetingLink!: string;
 
-  @Column({ name: "scheduled_at", type: "timestamp", nullable: true })
-  scheduledAt?: Date;
+  @Column({
+    name: "scheduled_at",
+    type: "timestamp",
+    nullable: true,
+    transformer: dateToEpoch as any,
+  })
+  scheduledAt?: any;
 
   @Column({ name: "created_by_id" })
   createdById!: number;
@@ -40,6 +45,11 @@ export class WardMeeting extends BaseEntity {
   @Column({ type: "text", nullable: true })
   notes?: string;
 
-  @Column({ name: "completed_at", type: "timestamp", nullable: true })
-  completedAt?: Date;
+  @Column({
+    name: "completed_at",
+    type: "timestamp",
+    nullable: true,
+    transformer: dateToEpoch as any,
+  })
+  completedAt?: any;
 }

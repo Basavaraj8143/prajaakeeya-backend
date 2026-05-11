@@ -6,7 +6,9 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import {
   ApiTags,
   ApiOperation,
@@ -21,6 +23,8 @@ import { CreateParliamentaryDto } from "./dto/create-parliamentary.dto";
 
 @ApiTags("Geography")
 @Controller("geography/parliamentary")
+@UseInterceptors(CacheInterceptor)
+@CacheTTL(3600_000)
 export class ParliamentaryController {
   constructor(private readonly parliamentaryService: ParliamentaryService) {}
 

@@ -9,7 +9,6 @@ import { ElectionsService } from "../elections/elections.service";
 import { ParliamentaryService } from "../geography/parliamentary.service";
 import { AssemblyService } from "../geography/assembly.service";
 import { MunicipalityService } from "../geography/municipality.service";
-import { CreateUserByEpicDto } from "../users/dto/create-user-by-epic.dto";
 import { UpdateUserDto } from "../users/dto/update-user.dto";
 import { CreateWardMeetingDto } from "../wards/dto/create-ward-meeting.dto";
 import { UpdateWardMeetingDto } from "../wards/dto/update-ward-meeting.dto";
@@ -65,8 +64,8 @@ export class AdminService {
     };
   }
 
-  async getAllReports(status?: string) {
-    return this.usersService.getAllReports(status);
+  async getAllReports(status?: string, page?: number, limit?: number) {
+    return this.usersService.getAllReports(status, page, limit);
   }
 
   async getReportById(id: number) {
@@ -88,10 +87,6 @@ export class AdminService {
   }
 
   // User Management
-  async createUserByEpic(dto: CreateUserByEpicDto) {
-    return this.usersService.createUserByEpic(dto);
-  }
-
   async getAllUsers() {
     return this.usersService.getAllUsers();
   }
@@ -116,8 +111,8 @@ export class AdminService {
     return this.usersService.deleteUser(id);
   }
 
-  async getUsersByWard(wardId: number) {
-    return this.usersService.getUsersByWard(wardId);
+  async getUsersByWard(wardId: number, page?: number, limit?: number) {
+    return this.usersService.getUsersByWard(wardId, page, limit);
   }
 
   // Ward Meeting Management

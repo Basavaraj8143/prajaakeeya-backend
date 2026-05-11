@@ -29,7 +29,11 @@ async function run() {
   }
 }
 
-run().catch((err) => {
-  console.error("Runner error:", err);
-  process.exit(1);
-});
+// Only auto-run when invoked directly (`node run-create-reports.js`),
+// never when imported by TypeORM's migrations glob.
+if (require.main === module) {
+  run().catch((err) => {
+    console.error("Runner error:", err);
+    process.exit(1);
+  });
+}

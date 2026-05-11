@@ -1,9 +1,12 @@
-import { Controller, Get, Query } from "@nestjs/common";
+import { Controller, Get, Query, UseInterceptors } from "@nestjs/common";
+import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import { ApiTags, ApiOperation, ApiQuery, ApiResponse } from "@nestjs/swagger";
 import { GramaPanchayatService } from "./grama-panchayat.service";
 
 @ApiTags("Grama Panchayat")
 @Controller("grama-panchayat")
+@UseInterceptors(CacheInterceptor)
+@CacheTTL(3600_000)
 export class GramaPanchayatController {
   constructor(private readonly service: GramaPanchayatService) {}
 

@@ -120,4 +120,32 @@ export class User extends BaseEntity {
     nullable: true,
   })
   passwordSalt?: string;
+
+  @Column({ name: "lok_sabha_constituency_id", type: "int", nullable: true })
+  lokSabhaConstituencyId?: number;
+
+  @Column({
+    name: "state_assembly_constituency_id",
+    type: "int",
+    nullable: true,
+  })
+  stateAssemblyConstituencyId?: number;
+
+  @Column({
+    name: "municipal_corporation_constituency_id",
+    type: "int",
+    nullable: true,
+  })
+  municipalCorporationConstituencyId?: number;
+
+  @Column({
+    name: "gram_panchayat_constituency_id",
+    type: "int",
+    nullable: true,
+  })
+  gramPanchayatConstituencyId?: number;
+
+  // Bumped on logout/block/password-change to invalidate outstanding JWTs.
+  @Column({ name: "token_version", type: "int", default: 0 })
+  tokenVersion!: number;
 }

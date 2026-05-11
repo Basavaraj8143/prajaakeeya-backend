@@ -1,5 +1,5 @@
 import { Column, Entity, ManyToOne, JoinColumn } from "typeorm";
-import { BaseEntity } from "../common/base.entity";
+import { BaseEntity, dateToEpoch } from "../common/base.entity";
 import { User } from "../users/user.entity";
 import { AdminDocument } from "../admin/admin-document.entity";
 
@@ -34,9 +34,17 @@ export class UserSignedDocument extends BaseEntity {
   @Column({ type: "text", nullable: true })
   rejectionReason?: string;
 
-  @Column({ type: "timestamp", nullable: true })
-  signedAt?: Date;
+  @Column({
+    type: "timestamp",
+    nullable: true,
+    transformer: dateToEpoch as any,
+  })
+  signedAt?: any;
 
-  @Column({ type: "timestamp", nullable: true })
-  verifiedAt?: Date;
+  @Column({
+    type: "timestamp",
+    nullable: true,
+    transformer: dateToEpoch as any,
+  })
+  verifiedAt?: any;
 }

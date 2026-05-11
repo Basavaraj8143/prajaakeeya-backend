@@ -21,7 +21,6 @@ import {
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { AdminService } from "./admin.service";
 import { UpdateReportStatusDto } from "../users/dto/update-report-status.dto";
-import { CreateUserByEpicDto } from "../users/dto/create-user-by-epic.dto";
 import { UpdateUserDto } from "../users/dto/update-user.dto";
 import { CreateWardMeetingDto } from "../wards/dto/create-ward-meeting.dto";
 import { UpdateWardMeetingDto } from "../wards/dto/update-ward-meeting.dto";
@@ -60,10 +59,20 @@ export class AdminController {
     enum: ["pending", "resolved", "rejected"],
     description: "Filter reports by status",
   })
+  @ApiQuery({ name: "page", required: false, type: Number })
+  @ApiQuery({ name: "limit", required: false, type: Number })
   @ApiResponse({ status: 200, description: "Reports returned successfully" })
   @ApiResponse({ status: 401, description: "Unauthorized" })
-  getAllReports(@Query("status") status?: string) {
-    return this.adminService.getAllReports(status);
+  getAllReports(
+    @Query("status") status?: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.getAllReports(
+      status,
+      page ? Number(page) : undefined,
+      limit ? Number(limit) : undefined,
+    );
   }
 
   @Get("reports/:id")
@@ -100,18 +109,6 @@ export class AdminController {
   }
 
   // User Management Endpoints
-  @Post("users")
-  @ApiOperation({ summary: "Create a new user using EPIC number" })
-  @ApiResponse({ status: 201, description: "User created successfully" })
-  @ApiResponse({
-    status: 400,
-    description: "Bad request or user already exists",
-  })
-  @ApiResponse({ status: 401, description: "Unauthorized" })
-  createUser(@Body() dto: CreateUserByEpicDto) {
-    return this.adminService.createUserByEpic(dto);
-  }
-
   @Get("users")
   @ApiOperation({ summary: "Get all users" })
   @ApiResponse({ status: 200, description: "Users returned successfully" })
@@ -173,10 +170,20 @@ export class AdminController {
   @Get("wards/:wardId/users")
   @ApiOperation({ summary: "Get all users in a specific ward" })
   @ApiParam({ name: "wardId", type: "number", description: "Ward ID" })
+  @ApiQuery({ name: "page", required: false, type: Number })
+  @ApiQuery({ name: "limit", required: false, type: Number })
   @ApiResponse({ status: 200, description: "Users returned successfully" })
   @ApiResponse({ status: 401, description: "Unauthorized" })
-  getUsersByWard(@Param("wardId") wardId: string) {
-    return this.adminService.getUsersByWard(+wardId);
+  getUsersByWard(
+    @Param("wardId") wardId: string,
+    @Query("page") page?: string,
+    @Query("limit") limit?: string,
+  ) {
+    return this.adminService.getUsersByWard(
+      +wardId,
+      page ? Number(page) : undefined,
+      limit ? Number(limit) : undefined,
+    );
   }
 
   // Ward Meeting Management Endpoints

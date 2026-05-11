@@ -6,7 +6,9 @@ import {
   Param,
   Query,
   UseGuards,
+  UseInterceptors,
 } from "@nestjs/common";
+import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import {
   ApiTags,
   ApiOperation,
@@ -21,6 +23,8 @@ import { CreateAssemblyDto } from "./dto/create-assembly.dto";
 
 @ApiTags("Geography")
 @Controller("geography/assembly")
+@UseInterceptors(CacheInterceptor)
+@CacheTTL(3600_000)
 export class AssemblyController {
   constructor(private readonly assemblyService: AssemblyService) {}
 

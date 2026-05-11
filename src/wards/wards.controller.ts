@@ -8,7 +8,9 @@ import {
   Put,
   UseGuards,
   Query,
+  UseInterceptors,
 } from "@nestjs/common";
+import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import {
   ApiTags,
   ApiOperation,
@@ -69,6 +71,8 @@ export class WardsController {
   }
 
   @Get("list")
+  @UseInterceptors(CacheInterceptor)
+  @CacheTTL(600_000)
   @ApiOperation({ summary: "Get simple list of wards (number and name)" })
   @ApiResponse({ status: 200, description: "List returned successfully" })
   listSimple() {

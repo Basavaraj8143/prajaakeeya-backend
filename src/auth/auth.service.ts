@@ -55,6 +55,55 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     private readonly configService: ConfigService,
   ) {}
 
+  /** Build the JWT payload — includes the fields the strategy/guards rely on. */
+  private buildJwtPayload(user: User) {
+    return {
+      sub: user.id,
+      role: user.role,
+      wardId: user.wardId,
+      isBlocked: user.isBlocked,
+      tokenVersion: user.tokenVersion ?? 0,
+    };
+  }
+
+  /** Issue a stateless HMAC-signed CSRF state token for the OAuth round-trip. */
+  issueOAuthState(): string {
+    const secret =
+      this.configService.get<string>("JWT_SECRET") ?? "dev-jwt-secret";
+    const crypto = require("crypto") as typeof import("crypto");
+    const ts = Date.now().toString(36);
+    const nonce = crypto.randomBytes(12).toString("hex");
+    const payload = `${ts}.${nonce}`;
+    const sig = crypto
+      .createHmac("sha256", secret)
+      .update(payload)
+      .digest("hex");
+    return `${payload}.${sig}`;
+  }
+
+  /** Verify an OAuth state token: signature must match and timestamp ≤10 min. */
+  verifyOAuthState(state: string): boolean {
+    const secret =
+      this.configService.get<string>("JWT_SECRET") ?? "dev-jwt-secret";
+    const crypto = require("crypto") as typeof import("crypto");
+    const parts = state.split(".");
+    if (parts.length !== 3) return false;
+    const [ts, nonce, sig] = parts;
+    const expected = crypto
+      .createHmac("sha256", secret)
+      .update(`${ts}.${nonce}`)
+      .digest("hex");
+    if (
+      sig.length !== expected.length ||
+      !crypto.timingSafeEqual(Buffer.from(sig), Buffer.from(expected))
+    ) {
+      return false;
+    }
+    const issuedAt = parseInt(ts, 36);
+    if (!Number.isFinite(issuedAt)) return false;
+    return Date.now() - issuedAt < 10 * 60 * 1000;
+  }
+
   // ===== Google OAuth 2.0 Authorization Code Flow =====
 
   getGoogleAuthUrl(state?: string): string {
@@ -174,7 +223,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     }
 
     // 4. Generate JWT
-    const jwt = await this.jwtService.signAsync({ sub: user!.id });
+    const jwt = await this.jwtService.signAsync(this.buildJwtPayload(user!));
 
     // 5. Build redirect URL back to the app with token
     const sep = frontendRedirect.includes("?") ? "&" : "?";
@@ -184,6 +233,12 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
   }
 
   onModuleInit() {
+    // Under PM2 cluster mode every worker would otherwise fire its own
+    // cleanup timer, hammering the otps table with redundant DELETE queries.
+    // Worker 0 owns the schedule; other workers stay idle.
+    const instance = process.env.NODE_APP_INSTANCE;
+    if (instance !== undefined && instance !== "0") return;
+
     this.cleanupTimer = setInterval(() => {
       this.cleanupOtps().catch(() => undefined);
     }, this.otpCleanupIntervalMs);
@@ -224,7 +279,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     }
 
     // Generate JWT directly — no OTP needed
-    const payload = { sub: existing.id };
+    const payload = this.buildJwtPayload(existing);
     let userWithWard: any = existing;
     if (existing.wardId) {
       try {
@@ -265,14 +320,16 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       throw new UnauthorizedException("Admin has no password set");
     }
     const crypto = await import("crypto");
-    const hash = crypto
-      .scryptSync(loginDto.password, existing.passwordSalt, 64)
-      .toString("hex");
+    const { promisify } = await import("util");
+    const scryptAsync = promisify(crypto.scrypt);
+    const hash = (
+      (await scryptAsync(loginDto.password, existing.passwordSalt, 64)) as Buffer
+    ).toString("hex");
     if (hash !== existing.passwordHash) {
       throw new UnauthorizedException("Invalid admin credentials");
     }
 
-    const payload = { sub: existing.id };
+    const payload = this.buildJwtPayload(existing);
     return { token: await this.jwtService.signAsync(payload), user: existing };
   }
 
@@ -320,7 +377,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     if (!user || user.isSelfDeleted) {
       throw new UnauthorizedException("User not found");
     }
-    const payload = { sub: user.id };
+    const payload = this.buildJwtPayload(user);
     // attach ward details (number, state, parliamentary, assembly) when available
     let userWithWard: any = user;
     if (user.wardId) {
@@ -396,7 +453,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     if (!user || user.role !== "admin") {
       throw new UnauthorizedException("Invalid admin credentials");
     }
-    const payload = { sub: user.id };
+    const payload = this.buildJwtPayload(user);
     return { token: await this.jwtService.signAsync(payload), user };
   }
 
@@ -575,7 +632,7 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
       );
     }
 
-    const payload = { sub: user.id };
+    const payload = this.buildJwtPayload(user);
     let userWithWard: any = user;
     if (user.wardId) {
       try {
@@ -607,113 +664,93 @@ export class AuthService implements OnModuleInit, OnModuleDestroy {
     const user = await this.usersService.findById(userId);
     if (!user || user.isSelfDeleted) return null;
 
+    // Run independent lookups concurrently. The aspirant lookup is only
+    // meaningful for aspirant users; others get undefined.
+    const [aspirant, ward, hasVoted] = await Promise.all([
+      user.role === "aspirant"
+        ? this.aspirantsService.findByUserId(user.id).catch(() => null)
+        : Promise.resolve(null),
+      user.wardId
+        ? this.wardsService.findOne(user.wardId).catch(() => null)
+        : Promise.resolve(null),
+      this.votesService.hasUserVotedInActiveWindow(user.id).catch(() => false),
+    ]);
+
     const result: any = { ...user };
-    if (user.role === "aspirant") {
+
+    if (ward) {
+      result.wardNumber = ward.number;
+      result.state = ward.state ?? result.state;
+      result.parliamentary = ward.parliamentary ?? result.parliamentary;
+      result.assembly = ward.assembly ?? result.assembly;
+      result.category = ward.category ?? result.category ?? null;
+    }
+
+    if (aspirant) {
+      result.aspirantId = aspirant.id;
+      result.electionId = aspirant.electionId ?? null;
+      result.constituencyId = aspirant.constituencyId ?? null;
       try {
-        const aspirant = await this.aspirantsService.findByUserId(user.id);
-        if (aspirant) {
-          result.aspirantId = aspirant.id;
-          result.electionId = aspirant.electionId ?? null;
-          result.constituencyId = aspirant.constituencyId ?? null;
-          // Resolve election and constituency names
-          if (aspirant.electionId) {
-            try {
-              const election = await this.electionsService.findById(
-                aspirant.electionId,
-              );
-              result.electionName = election.name;
-              result.electionType = election.type;
-              if (aspirant.constituencyId) {
-                try {
-                  if (election.type === "lok_sabha") {
-                    const pc = await this.parliamentaryService.findOne(
-                      aspirant.constituencyId,
-                    );
-                    result.constituencyName = pc.name;
-                  } else if (election.type === "state_assembly") {
-                    const ac = await this.assemblyService.findOne(
-                      aspirant.constituencyId,
-                    );
-                    result.constituencyName = ac.name;
-                  } else if (election.type === "municipal_corporation") {
-                    const ward = await this.wardsService.findOne(
-                      aspirant.constituencyId,
-                    );
-                    result.constituencyName = `${ward.number} - ${ward.name}`;
-                  } else if (election.type === "gram_panchayat") {
-                    const village = await this.gramaPanchayatService.findBySrNo(
-                      aspirant.constituencyId,
-                    );
-                    result.constituencyName = village.villageName;
-                    result.gpName = village.gpName;
-                    result.taluk = village.taluk;
-                    result.district = village.district;
-                  }
-                } catch (e) {
-                  // ignore constituency lookup errors
-                }
-              }
-            } catch (e) {
-              // ignore election lookup errors
-            }
-          }
-          // Attach document verification status from aspirant profile
+        result.documentStatus = aspirant.getDocumentStatus();
+      } catch {
+        /* method unavailable */
+      }
+      result.allowPhone = aspirant.allowPhone;
+      result.allowWhatsapp = aspirant.allowWhatsapp;
+      result.allowChat = aspirant.allowChat;
+
+      // Resolve election/constituency/aspirant-ward in parallel.
+      const [election, aspirantWard] = await Promise.all([
+        aspirant.electionId
+          ? this.electionsService.findById(aspirant.electionId).catch(() => null)
+          : Promise.resolve(null),
+        aspirant.wardId
+          ? this.wardsService.findOne(aspirant.wardId).catch(() => null)
+          : Promise.resolve(null),
+      ]);
+
+      if (election) {
+        result.electionName = election.name;
+        result.electionType = election.type;
+        if (aspirant.constituencyId) {
           try {
-            result.documentStatus = aspirant.getDocumentStatus();
-          } catch (e) {
-            // ignore if method unavailable
-          }
-          result.allowPhone = aspirant.allowPhone;
-          result.allowWhatsapp = aspirant.allowWhatsapp;
-          result.allowChat = aspirant.allowChat;
-          // If aspirant has a wardId, attach that ward's number as the aspirant ward
-          if (aspirant.wardId) {
-            try {
-              const aspirantWard = await this.wardsService.findOne(
-                aspirant.wardId,
+            if (election.type === "lok_sabha") {
+              const pc = await this.parliamentaryService.findOne(
+                aspirant.constituencyId,
               );
-              if (aspirantWard) {
-                // Attach aspirantWardNumber to make it explicit
-                result.aspirantWardNumber = aspirantWard.number;
-                // Also prefer aspirant wardNumber if user.wardId is not set
-                if (!result.wardNumber) result.wardNumber = aspirantWard.number;
-              }
-            } catch (e) {
-              // ignore aspirant ward lookup errors
+              result.constituencyName = pc.name;
+            } else if (election.type === "state_assembly") {
+              const ac = await this.assemblyService.findOne(
+                aspirant.constituencyId,
+              );
+              result.constituencyName = ac.name;
+            } else if (election.type === "municipal_corporation") {
+              const w = await this.wardsService.findOne(
+                aspirant.constituencyId,
+              );
+              result.constituencyName = `${w.number} - ${w.name}`;
+            } else if (election.type === "gram_panchayat") {
+              const village = await this.gramaPanchayatService.findBySrNo(
+                aspirant.constituencyId,
+              );
+              result.constituencyName = village.villageName;
+              result.gpName = village.gpName;
+              result.taluk = village.taluk;
+              result.district = village.district;
             }
+          } catch {
+            /* ignore */
           }
         }
-      } catch (e) {
-        // ignore lookup errors
+      }
+
+      if (aspirantWard) {
+        result.aspirantWardNumber = aspirantWard.number;
+        if (!result.wardNumber) result.wardNumber = aspirantWard.number;
       }
     }
-    // Attach ward metadata (including ward number) when available
-    if (user.wardId) {
-      try {
-        const ward = await this.wardsService.findOne(user.wardId);
-        if (ward) {
-          result.wardNumber = ward.number;
-          result.state = ward.state ?? result.state;
-          result.parliamentary = ward.parliamentary ?? result.parliamentary;
-          result.assembly = ward.assembly ?? result.assembly;
-          // Include ward category (telegram link removed)
-          result.category = ward.category ?? result.category ?? null;
-        }
-      } catch (e) {
-        // ignore if ward lookup fails
-      }
-    }
-    // Interaction flags are already part of user entity, no need to fetch separately
-    // They will be included in the result automatically
-    // Add voting status flag
-    try {
-      result.hasVoted = await this.votesService.hasUserVotedInActiveWindow(
-        user.id,
-      );
-    } catch (e) {
-      // ignore vote lookup errors and default to false
-      result.hasVoted = false;
-    }
+
+    result.hasVoted = hasVoted;
     return result;
   }
 

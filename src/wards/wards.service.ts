@@ -87,20 +87,12 @@ export class WardsService {
   }
 
   async findByName(name: string) {
-    // Trim whitespace from the input
     const trimmedName = name.trim();
 
-    // Try exact match first
-    let ward = await this.repo.findOne({ where: { name: trimmedName } });
-    if (ward) return ward;
-
-    // Try case-insensitive match
-    const wards = await this.repo.find();
-    // Array.find returns `Ward | undefined`; normalize to `null` to match repo.findOne return type
-    ward =
-      wards.find(
-        (w) => w.name.trim().toLowerCase() === trimmedName.toLowerCase(),
-      ) ?? null;
+    const ward = await this.repo
+      .createQueryBuilder("ward")
+      .where("LOWER(TRIM(ward.name)) = LOWER(:name)", { name: trimmedName })
+      .getOne();
     if (ward) return ward;
 
     throw new NotFoundException(`Ward not found with name: ${name}`);

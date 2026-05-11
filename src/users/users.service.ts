@@ -2,19 +2,15 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
-  Inject,
-  forwardRef,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
-import { Repository, DataSource } from "typeorm";
+import { Repository, DataSource, In } from "typeorm";
 import { S3Service } from "../common/services/s3.service";
 import { User } from "./user.entity";
 import { Report } from "./report.entity";
 import { UserSignedDocument } from "./user-signed-document.entity";
 import { CreateReportDto } from "./dto/create-report.dto";
-import { CreateUserByEpicDto } from "./dto/create-user-by-epic.dto";
 import { UpdateUserDto } from "./dto/update-user.dto";
-import { WardsService } from "../wards/wards.service";
 import { Vote } from "../votes/vote.entity";
 import { Message } from "../forum/message.entity";
 import { AspirantMessage } from "../aspirants/aspirant-message.entity";
@@ -24,9 +20,8 @@ import { AspirantBooking } from "../aspirants/aspirant-booking.entity";
 import { VisitResponse } from "../aspirants/visit-response.entity";
 import { WardMeeting } from "../wards/ward-meeting.entity";
 import { UserAspirantInteraction } from "./user-aspirant-interaction.entity";
-import axios from "axios";
-import * as https from "https";
-import { profile } from "console";
+
+type InteractionType = "chat" | "meeting" | "directMeet" | "phoneCall";
 
 @Injectable()
 export class UsersService {
@@ -52,13 +47,18 @@ export class UsersService {
     private readonly visitResponseRepo: Repository<VisitResponse>,
     @InjectRepository(WardMeeting)
     private readonly wardMeetingRepo: Repository<WardMeeting>,
-    private readonly wardsService: WardsService,
     private readonly dataSource: DataSource,
     private readonly s3Service: S3Service,
   ) {}
 
   findById(id: number) {
     return this.repo.findOne({ where: { id } });
+  }
+
+  /** Bulk-fetch users by id. Used to avoid N+1 lookup loops. */
+  findManyByIds(ids: number[]): Promise<User[]> {
+    if (!ids.length) return Promise.resolve([]);
+    return this.repo.findBy({ id: In(ids) as any });
   }
 
   async getLastInteractionMessage(userId: number): Promise<string | null> {
@@ -148,8 +148,12 @@ export class UsersService {
     // If password is provided, hash and set it
     if (password) {
       const crypto = await import("crypto");
+      const { promisify } = await import("util");
+      const scryptAsync = promisify(crypto.scrypt);
       const salt = crypto.randomBytes(16).toString("hex");
-      const hash = crypto.scryptSync(password, salt, 64).toString("hex");
+      const hash = (
+        (await scryptAsync(password, salt, 64)) as Buffer
+      ).toString("hex");
       user.passwordSalt = salt;
       user.passwordHash = hash;
     }
@@ -285,7 +289,7 @@ export class UsersService {
     return this.reportRepo.save(report);
   }
 
-  async getAllReports(status?: string) {
+  async getAllReports(status?: string, page?: number, limit?: number) {
     const queryBuilder = this.reportRepo
       .createQueryBuilder("report")
       .leftJoinAndSelect("report.reportedUser", "reportedUser")
@@ -297,7 +301,25 @@ export class UsersService {
       queryBuilder.where("report.status = :status", { status });
     }
 
-    return queryBuilder.getMany();
+    // Backwards-compatible: when callers don't request pagination, return the
+    // bare array (the historical admin response shape). Pagination kicks in
+    // only when page or limit is explicitly provided.
+    if (page === undefined && limit === undefined) {
+      return queryBuilder.getMany();
+    }
+
+    const safeLimit = Math.min(Math.max(limit ?? 50, 1), 200);
+    const safePage = Math.max(page ?? 1, 1);
+    queryBuilder.skip((safePage - 1) * safeLimit).take(safeLimit);
+
+    const [data, total] = await queryBuilder.getManyAndCount();
+    return {
+      data,
+      total,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(total / safeLimit),
+    };
   }
 
   async getReportById(id: number) {
@@ -350,101 +372,6 @@ export class UsersService {
     }
 
     return this.reportRepo.save(report);
-  }
-
-  // Admin user management methods
-  async createUserByEpic(dto: CreateUserByEpicDto): Promise<User> {
-    // Check if user with phone already exists
-    const existing = await this.repo.findOne({ where: { phone: dto.phone } });
-    if (existing) {
-      throw new BadRequestException(
-        "User with this phone number already exists",
-      );
-    }
-
-    // Check if user with EPIC already exists
-    const epicNormalized = dto.epicNumber?.trim();
-    if (epicNormalized) {
-      const existingEpic = await this.repo.findOne({
-        where: [{ epicId: epicNormalized }, { voterEpic: epicNormalized }],
-      });
-      if (existingEpic) {
-        throw new BadRequestException("User with this EPIC already exists");
-      }
-    }
-
-    // Call electoral API to fetch voter details
-    let voterData: any;
-    try {
-      const response = await axios.post(
-        "https://electoralapi.bbmpgov.in/searchby-epic",
-        { epic_no: dto.epicNumber },
-        {
-          headers: { "Content-Type": "application/json" },
-          timeout: 10000,
-          httpsAgent: new https.Agent({ rejectUnauthorized: false }),
-        },
-      );
-      voterData = response.data;
-
-      // Log the response for debugging
-      console.log("Electoral API Response:", voterData);
-    } catch (error: any) {
-      throw new BadRequestException({
-        message: "Failed to fetch voter details from electoral API",
-        details: error.response?.data,
-      });
-    }
-
-    // Extract voter data
-    const extractFirst = (d: any): any => {
-      if (d == null) return d;
-      if (Array.isArray(d)) return d[0];
-      if (d.data) return extractFirst(d.data);
-      return d;
-    };
-
-    const voter = extractFirst(voterData);
-    if (!voter) {
-      throw new NotFoundException("Voter not found in electoral records");
-    }
-
-    // Find ward by name from electoral API (same as registerVoter)
-    let wardId: number | undefined;
-    const wardNameFromApi = voter?.ward_name || voter?.ward_name_l1;
-    if (wardNameFromApi) {
-      try {
-        const ward = await this.wardsService.findByName(wardNameFromApi);
-        wardId = ward.id;
-      } catch (error) {
-        // Ward not found - continue without wardId
-        console.warn(`Ward not found with name: ${wardNameFromApi}`);
-      }
-    }
-
-    // Create user from electoral data (matching registerVoter field mapping)
-    const user = this.repo.create({
-      phone: dto.phone,
-      role: dto.role || "voter",
-      name: voter?.name_en,
-      relativeName: voter?.rln_name_en || "",
-      epicId: voter?.voter_epic || dto.epicNumber,
-      gender: voter?.gender,
-      wardId,
-      voterEpic: voter?.voter_epic,
-      nameEn: voter?.name_en,
-      nameKn: voter?.name_kn,
-      corporationName: voter?.corporation_name,
-      corporationNameL1: voter?.corporation_name_l1,
-      wardName: voter?.ward_name,
-      wardNameL1: voter?.ward_name_l1,
-      psName: voter?.ps_name,
-      psNameL1: voter?.ps_name_l1,
-      psLong: voter?.ps_long ? parseFloat(String(voter.ps_long)) : undefined,
-      psLat: voter?.ps_lat ? parseFloat(String(voter.ps_lat)) : undefined,
-    });
-
-    return this.repo.save(user);
   }
 
   async getAllUsers(wardId?: number): Promise<User[]> {
@@ -528,6 +455,40 @@ export class UsersService {
     if (dto.isBlocked !== undefined) user.isBlocked = dto.isBlocked;
     if (dto.profilePicture !== undefined)
       user.profilePicture = dto.profilePicture;
+    if (dto.lokSabhaConstituencyId !== undefined)
+      user.lokSabhaConstituencyId = dto.lokSabhaConstituencyId;
+    if (dto.stateAssemblyConstituencyId !== undefined)
+      user.stateAssemblyConstituencyId = dto.stateAssemblyConstituencyId;
+    if (dto.municipalCorporationConstituencyId !== undefined)
+      user.municipalCorporationConstituencyId =
+        dto.municipalCorporationConstituencyId;
+    if (dto.gramPanchayatConstituencyId !== undefined)
+      user.gramPanchayatConstituencyId = dto.gramPanchayatConstituencyId;
+
+    return this.repo.save(user);
+  }
+
+  async updateConstituencies(
+    userId: number,
+    dto: {
+      lokSabhaConstituencyId?: number;
+      stateAssemblyConstituencyId?: number;
+      municipalCorporationConstituencyId?: number;
+      gramPanchayatConstituencyId?: number;
+    },
+  ): Promise<User> {
+    const user = await this.repo.findOne({ where: { id: userId } });
+    if (!user) throw new NotFoundException("User not found");
+
+    if (dto.lokSabhaConstituencyId !== undefined)
+      user.lokSabhaConstituencyId = dto.lokSabhaConstituencyId;
+    if (dto.stateAssemblyConstituencyId !== undefined)
+      user.stateAssemblyConstituencyId = dto.stateAssemblyConstituencyId;
+    if (dto.municipalCorporationConstituencyId !== undefined)
+      user.municipalCorporationConstituencyId =
+        dto.municipalCorporationConstituencyId;
+    if (dto.gramPanchayatConstituencyId !== undefined)
+      user.gramPanchayatConstituencyId = dto.gramPanchayatConstituencyId;
 
     return this.repo.save(user);
   }
@@ -613,51 +574,78 @@ export class UsersService {
     });
   }
 
-  async getUsersByWard(wardId: number): Promise<User[]> {
-    return this.repo.find({
+  async getUsersByWard(wardId: number, page?: number, limit?: number) {
+    // Bare-array response is preserved when caller doesn't ask for pagination
+    // (matches the historical admin endpoint behaviour).
+    if (page === undefined && limit === undefined) {
+      return this.repo.find({
+        where: { wardId },
+        relations: ["ward"],
+        order: { createdAt: "DESC" },
+      });
+    }
+
+    const safeLimit = Math.min(Math.max(limit ?? 50, 1), 200);
+    const safePage = Math.max(page ?? 1, 1);
+    const [data, total] = await this.repo.findAndCount({
       where: { wardId },
       relations: ["ward"],
       order: { createdAt: "DESC" },
+      skip: (safePage - 1) * safeLimit,
+      take: safeLimit,
     });
+    return {
+      data,
+      total,
+      page: safePage,
+      limit: safeLimit,
+      totalPages: Math.ceil(total / safeLimit),
+    };
   }
 
   // Interaction tracking methods
-  async trackChat(
+  private async trackInteraction(
     userId: number,
     aspirantId: number,
+    type: InteractionType,
   ): Promise<{ user: User; message: string }> {
-    const user = await this.repo.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException("User not found");
+    const flagCol = {
+      chat: "isChat",
+      meeting: "isMeeting",
+      directMeet: "isDirectMeet",
+      phoneCall: "isPhoneCall",
+    }[type];
 
-    const aspirant = await this.aspirantRepo.findOne({
-      where: { id: aspirantId },
-    });
+    const interactionLabel = {
+      chat: "Chat",
+      meeting: "Meeting",
+      directMeet: "Direct meet",
+      phoneCall: "Phone call",
+    }[type];
+
+    const [user, aspirant] = await Promise.all([
+      this.repo.findOne({ where: { id: userId } }),
+      this.aspirantRepo.findOne({ where: { id: aspirantId } }),
+    ]);
+    if (!user) throw new NotFoundException("User not found");
     if (!aspirant) throw new NotFoundException("Aspirant not found");
 
-    // Create or update interaction record
-    let interaction = await this.userAspirantInteractionRepo
-      .createQueryBuilder("interaction")
-      .where("interaction.userId = :userId", { userId })
-      .andWhere("interaction.aspirantId = :aspirantId", { aspirantId })
-      .getOne();
-
-    if (!interaction) {
-      interaction = await this.userAspirantInteractionRepo.save({
+    // SELECT-then-INSERT/UPDATE keeps behavior identical to the original
+    // four track* methods and doesn't depend on a DB unique constraint.
+    const existing = await this.userAspirantInteractionRepo.findOne({
+      where: { userId, aspirantId },
+    });
+    if (existing) {
+      (existing as any)[flagCol] = true;
+      await this.userAspirantInteractionRepo.save(existing);
+    } else {
+      await this.userAspirantInteractionRepo.save({
         userId,
         aspirantId,
-        isChat: true,
+        [flagCol]: true,
       } as any);
-    } else {
-      interaction.isChat = true;
-      await this.userAspirantInteractionRepo.save(interaction);
     }
 
-    // Check total aspirants in user's ward
-    const totalAspirantsInWard = await this.aspirantRepo.count({
-      where: { wardId: user.wardId },
-    });
-
-    // Check if user has interacted with enough different aspirants
     const uniqueAspirants = await this.userAspirantInteractionRepo
       .createQueryBuilder("interaction")
       .where("interaction.userId = :userId", { userId })
@@ -668,202 +656,35 @@ export class UsersService {
     const requiredCount = 1;
     const aspirantLabel = aspirant.name || `#${aspirantId}`;
     const message =
-      `Chat interaction tracked with aspirant ${aspirantLabel}.` +
+      `${interactionLabel} interaction tracked with aspirant ${aspirantLabel}.` +
       (count >= requiredCount
         ? ` You have interacted with ${count} aspirant(s). Voting enabled!`
         : ` Interact with ${requiredCount - count} more aspirant(s) to enable voting.`);
 
+    const userPatch: Partial<User> = { lastInteractionMessage: message };
     if (count >= requiredCount) {
-      user.isChat = true;
+      (userPatch as any)[flagCol] = true;
     }
-
-    user.lastInteractionMessage = message;
-    await this.repo.save(user);
+    await this.repo.update(userId, userPatch);
+    Object.assign(user, userPatch);
 
     return { user, message };
   }
 
-  async trackMeeting(
-    userId: number,
-    aspirantId: number,
-  ): Promise<{ user: User; message: string }> {
-    const user = await this.repo.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException("User not found");
-
-    const aspirant = await this.aspirantRepo.findOne({
-      where: { id: aspirantId },
-    });
-    if (!aspirant) throw new NotFoundException("Aspirant not found");
-
-    // Create or update interaction record
-    let interaction = await this.userAspirantInteractionRepo
-      .createQueryBuilder("interaction")
-      .where("interaction.userId = :userId", { userId })
-      .andWhere("interaction.aspirantId = :aspirantId", { aspirantId })
-      .getOne();
-
-    if (!interaction) {
-      interaction = await this.userAspirantInteractionRepo.save({
-        userId,
-        aspirantId,
-        isMeeting: true,
-      } as any);
-    } else {
-      interaction.isMeeting = true;
-      await this.userAspirantInteractionRepo.save(interaction);
-    }
-
-    // Check total aspirants in user's ward
-    const totalAspirantsInWard = await this.aspirantRepo.count({
-      where: { wardId: user.wardId },
-    });
-
-    // Check if user has interacted with enough different aspirants
-    const uniqueAspirants = await this.userAspirantInteractionRepo
-      .createQueryBuilder("interaction")
-      .where("interaction.userId = :userId", { userId })
-      .select("COUNT(DISTINCT interaction.aspirantId)", "count")
-      .getRawOne();
-
-    const count = parseInt(uniqueAspirants.count);
-    const requiredCount = 1;
-    const aspirantLabel = aspirant.name || `#${aspirantId}`;
-    const message =
-      `Meeting interaction tracked with aspirant ${aspirantLabel}.` +
-      (count >= requiredCount
-        ? ` You have interacted with ${count} aspirant(s). Voting enabled!`
-        : ` Interact with ${requiredCount - count} more aspirant(s) to enable voting.`);
-
-    if (count >= requiredCount) {
-      user.isMeeting = true;
-    }
-
-    user.lastInteractionMessage = message;
-    await this.repo.save(user);
-
-    return { user, message };
+  trackChat(userId: number, aspirantId: number) {
+    return this.trackInteraction(userId, aspirantId, "chat");
   }
 
-  async trackDirectMeet(
-    userId: number,
-    aspirantId: number,
-  ): Promise<{ user: User; message: string }> {
-    const user = await this.repo.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException("User not found");
-
-    const aspirant = await this.aspirantRepo.findOne({
-      where: { id: aspirantId },
-    });
-    if (!aspirant) throw new NotFoundException("Aspirant not found");
-
-    // Create or update interaction record
-    let interaction = await this.userAspirantInteractionRepo
-      .createQueryBuilder("interaction")
-      .where("interaction.userId = :userId", { userId })
-      .andWhere("interaction.aspirantId = :aspirantId", { aspirantId })
-      .getOne();
-
-    if (!interaction) {
-      interaction = await this.userAspirantInteractionRepo.save({
-        userId,
-        aspirantId,
-        isDirectMeet: true,
-      } as any);
-    } else {
-      interaction.isDirectMeet = true;
-      await this.userAspirantInteractionRepo.save(interaction);
-    }
-
-    // Check total aspirants in user's ward
-    const totalAspirantsInWard = await this.aspirantRepo.count({
-      where: { wardId: user.wardId },
-    });
-
-    // Check if user has interacted with enough different aspirants
-    const uniqueAspirants = await this.userAspirantInteractionRepo
-      .createQueryBuilder("interaction")
-      .where("interaction.userId = :userId", { userId })
-      .select("COUNT(DISTINCT interaction.aspirantId)", "count")
-      .getRawOne();
-
-    const count = parseInt(uniqueAspirants.count);
-    const requiredCount = 1;
-    const aspirantLabel = aspirant.name || `#${aspirantId}`;
-    const message =
-      `Direct meet interaction tracked with aspirant ${aspirantLabel}.` +
-      (count >= requiredCount
-        ? ` You have interacted with ${count} aspirant(s). Voting enabled!`
-        : ` Interact with ${requiredCount - count} more aspirant(s) to enable voting.`);
-
-    if (count >= requiredCount) {
-      user.isDirectMeet = true;
-    }
-
-    user.lastInteractionMessage = message;
-    await this.repo.save(user);
-
-    return { user, message };
+  trackMeeting(userId: number, aspirantId: number) {
+    return this.trackInteraction(userId, aspirantId, "meeting");
   }
 
-  async trackPhoneCall(
-    userId: number,
-    aspirantId: number,
-  ): Promise<{ user: User; message: string }> {
-    const user = await this.repo.findOne({ where: { id: userId } });
-    if (!user) throw new NotFoundException("User not found");
+  trackDirectMeet(userId: number, aspirantId: number) {
+    return this.trackInteraction(userId, aspirantId, "directMeet");
+  }
 
-    const aspirant = await this.aspirantRepo.findOne({
-      where: { id: aspirantId },
-    });
-    if (!aspirant) throw new NotFoundException("Aspirant not found");
-
-    // Create or update interaction record
-    let interaction = await this.userAspirantInteractionRepo
-      .createQueryBuilder("interaction")
-      .where("interaction.userId = :userId", { userId })
-      .andWhere("interaction.aspirantId = :aspirantId", { aspirantId })
-      .getOne();
-
-    if (!interaction) {
-      interaction = await this.userAspirantInteractionRepo.save({
-        userId,
-        aspirantId,
-        isPhoneCall: true,
-      } as any);
-    } else {
-      interaction.isPhoneCall = true;
-      await this.userAspirantInteractionRepo.save(interaction);
-    }
-
-    // Check total aspirants in user's ward
-    const totalAspirantsInWard = await this.aspirantRepo.count({
-      where: { wardId: user.wardId },
-    });
-
-    // Check if user has interacted with enough different aspirants
-    const uniqueAspirants = await this.userAspirantInteractionRepo
-      .createQueryBuilder("interaction")
-      .where("interaction.userId = :userId", { userId })
-      .select("COUNT(DISTINCT interaction.aspirantId)", "count")
-      .getRawOne();
-
-    const count = parseInt(uniqueAspirants.count);
-    const requiredCount = 1;
-    const aspirantLabel = aspirant.name || `#${aspirantId}`;
-    const message =
-      `Phone call interaction tracked with aspirant ${aspirantLabel}.` +
-      (count >= requiredCount
-        ? ` You have interacted with ${count} aspirant(s). Voting enabled!`
-        : ` Interact with ${requiredCount - count} more aspirant(s) to enable voting.`);
-
-    if (count >= requiredCount) {
-      user.isPhoneCall = true;
-    }
-
-    user.lastInteractionMessage = message;
-    await this.repo.save(user);
-
-    return { user, message };
+  trackPhoneCall(userId: number, aspirantId: number) {
+    return this.trackInteraction(userId, aspirantId, "phoneCall");
   }
 
   async clearPhone(userId: number) {

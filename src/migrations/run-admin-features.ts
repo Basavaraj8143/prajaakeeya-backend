@@ -72,7 +72,9 @@ async function run() {
   }
 }
 
-run().catch((err) => {
-  console.error("Runner error:", err);
-  process.exit(1);
-});
+if (require.main === module) {
+  run().catch((err) => {
+    console.error("Runner error:", err);
+    process.exit(1);
+  });
+}

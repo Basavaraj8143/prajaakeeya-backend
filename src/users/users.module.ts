@@ -6,7 +6,6 @@ import { UserSignedDocument } from "./user-signed-document.entity";
 import { UserAspirantInteraction } from "./user-aspirant-interaction.entity";
 import { UsersService } from "./users.service";
 import { UsersController } from "./users.controller";
-import { WardsModule } from "../wards/wards.module";
 import { Vote } from "../votes/vote.entity";
 import { Message } from "../forum/message.entity";
 import { AspirantMessage } from "../aspirants/aspirant-message.entity";
@@ -32,7 +31,6 @@ import { WardMeeting } from "../wards/ward-meeting.entity";
       VisitResponse,
       WardMeeting,
     ]),
-    WardsModule,
   ],
   providers: [UsersService],
   controllers: [UsersController],

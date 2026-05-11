@@ -37,7 +37,9 @@ import { MessageCentralService } from "../common/services/message-central.servic
       inject: [ConfigService],
       useFactory: (configService: ConfigService) => ({
         secret: configService.get<string>("JWT_SECRET"),
-        signOptions: { expiresIn: "365d" },
+        signOptions: {
+          expiresIn: configService.get<string>("JWT_EXPIRES_IN") || "24h",
+        },
       }),
     }),
   ],

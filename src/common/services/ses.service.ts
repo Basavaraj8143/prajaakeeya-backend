@@ -5,6 +5,7 @@ import {
   BadRequestException,
 } from "@nestjs/common";
 import { SESClient, SendEmailCommand } from "@aws-sdk/client-ses";
+import { randomBytes, randomInt } from "crypto";
 
 export interface SendOtpResponse {
   verificationId: string;
@@ -53,20 +54,19 @@ export class SESService {
   }
 
   /**
-   * Generate a random 6-digit OTP
+   * Generate a cryptographically random 6-digit OTP.
+   * `Math.random` is non-cryptographic and should never be used for codes
+   * that gate authentication.
    */
   private generateOtp(): string {
-    return Math.floor(100000 + Math.random() * 900000).toString();
+    return String(randomInt(100_000, 1_000_000));
   }
 
   /**
-   * Generate a unique verification ID
+   * Generate a cryptographically random verification ID.
    */
   private generateVerificationId(): string {
-    return (
-      Math.random().toString(36).substring(2, 15) +
-      Math.random().toString(36).substring(2, 15)
-    );
+    return randomBytes(16).toString("hex");
   }
 
   /**

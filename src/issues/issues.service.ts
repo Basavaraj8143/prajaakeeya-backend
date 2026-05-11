@@ -125,6 +125,40 @@ export class IssuesService {
     constituencyId: number,
     userId?: number,
   ) {
+    // Single GROUP BY pulls every category's count plus whether the current
+    // user has raised that category — no per-category round-trip.
+    const qb = this.handRepo
+      .createQueryBuilder("h")
+      .select("h.category", "category")
+      .addSelect("COUNT(*)::int", "cnt")
+      .where('h."electionId" = :electionId', { electionId })
+      .andWhere('h."constituencyId" = :constituencyId', { constituencyId })
+      .groupBy("h.category");
+
+    if (userId !== undefined) {
+      qb.addSelect(
+        'BOOL_OR(h."createdById" = :uid)',
+        "raised",
+      ).setParameter("uid", userId);
+    }
+
+    const rows: Array<{
+      category: string;
+      cnt: number;
+      raised?: boolean;
+    }> = await qb.getRawMany();
+
+    const dbMap = new Map<
+      string,
+      { count: number; isRaised?: boolean }
+    >();
+    for (const r of rows) {
+      dbMap.set(r.category, {
+        count: Number(r.cnt),
+        isRaised: userId !== undefined ? Boolean(r.raised) : undefined,
+      });
+    }
+
     const results: {
       name: string;
       nameKn: string;
@@ -132,10 +166,9 @@ export class IssuesService {
       isRaised?: boolean;
     }[] = [];
 
+    // Static categories first (preserve well-known order, default count to 0).
     for (const name of ISSUE_CATEGORIES) {
-      const count = await this.handRepo.count({
-        where: { electionId, constituencyId, category: name },
-      });
+      const stats = dbMap.get(name);
       const entry: {
         name: string;
         nameKn: string;
@@ -144,55 +177,27 @@ export class IssuesService {
       } = {
         name,
         nameKn: CATEGORY_KANNADA[name] ?? name,
-        count,
+        count: stats?.count ?? 0,
       };
-      if (userId !== undefined) {
-        const raised = await this.handRepo.findOne({
-          where: {
-            electionId,
-            constituencyId,
-            createdById: userId,
-            category: name,
-          },
-        });
-        entry.isRaised = !!raised;
-      }
+      if (userId !== undefined) entry.isRaised = stats?.isRaised ?? false;
       results.push(entry);
     }
 
-    // include any other dynamic categories saved in DB that are not in the static list
-    const otherRows = await this.handRepo
-      .createQueryBuilder("h")
-      .select("h.category", "category")
-      .addSelect("COUNT(*)", "cnt")
-      .where('h."electionId" = :electionId', { electionId })
-      .andWhere('h."constituencyId" = :constituencyId', { constituencyId })
-      .andWhere("h.category NOT IN (:...cats)", { cats: ISSUE_CATEGORIES })
-      .groupBy("h.category")
-      .getRawMany();
-
-    for (const r of otherRows) {
+    // Dynamic / unexpected categories that were saved in DB but not in the
+    // static list — surface them with their counts too.
+    for (const [category, stats] of dbMap) {
+      if (ISSUE_CATEGORIES.includes(category)) continue;
       const entry: {
         name: string;
         nameKn: string;
         count: number;
         isRaised?: boolean;
       } = {
-        name: r.category,
-        nameKn: CATEGORY_KANNADA[r.category] ?? r.category,
-        count: Number(r.cnt),
+        name: category,
+        nameKn: CATEGORY_KANNADA[category] ?? category,
+        count: stats.count,
       };
-      if (userId !== undefined) {
-        const raised = await this.handRepo.findOne({
-          where: {
-            electionId,
-            constituencyId,
-            createdById: userId,
-            category: r.category,
-          },
-        });
-        entry.isRaised = !!raised;
-      }
+      if (userId !== undefined) entry.isRaised = stats.isRaised ?? false;
       results.push(entry);
     }
 

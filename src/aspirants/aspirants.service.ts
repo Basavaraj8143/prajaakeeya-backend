@@ -20,6 +20,12 @@ import { VotesService } from "../votes/votes.service";
 import { ElectionsService } from "../elections/elections.service";
 import { ActivityRating } from "./activity-rating.entity";
 import { UpdateAspirantDto } from "./dto/update-aspirant.dto";
+import { User } from "../users/user.entity";
+
+interface ResponseCounts {
+  attending: number;
+  notAttending: number;
+}
 
 @Injectable()
 export class AspirantsService {
@@ -43,6 +49,153 @@ export class AspirantsService {
     @Inject(forwardRef(() => VotesService))
     private readonly votesService: VotesService,
   ) {}
+
+  /** Aggregated meeting response counts by meeting id, in one query. */
+  private async getMeetingResponseCounts(
+    meetingIds: number[],
+  ): Promise<Map<number, ResponseCounts>> {
+    const map = new Map<number, ResponseCounts>();
+    if (!meetingIds.length) return map;
+    const rows = await this.meetingResponseRepo
+      .createQueryBuilder("r")
+      .select("r.meetingId", "meetingId")
+      .addSelect(
+        "SUM(CASE WHEN r.attending THEN 1 ELSE 0 END)::int",
+        "attending",
+      )
+      .addSelect(
+        "SUM(CASE WHEN r.attending = false THEN 1 ELSE 0 END)::int",
+        "notAttending",
+      )
+      .where("r.meetingId IN (:...ids)", { ids: meetingIds })
+      .groupBy("r.meetingId")
+      .getRawMany();
+    for (const r of rows) {
+      map.set(Number(r.meetingId), {
+        attending: Number(r.attending) || 0,
+        notAttending: Number(r.notAttending) || 0,
+      });
+    }
+    return map;
+  }
+
+  /** Aggregated visit response counts by visit id, in one query. */
+  private async getVisitResponseCounts(
+    visitIds: number[],
+  ): Promise<Map<number, ResponseCounts>> {
+    const map = new Map<number, ResponseCounts>();
+    if (!visitIds.length) return map;
+    const rows = await this.visitResponseRepo
+      .createQueryBuilder("r")
+      .select("r.visitId", "visitId")
+      .addSelect(
+        "SUM(CASE WHEN r.attending THEN 1 ELSE 0 END)::int",
+        "attending",
+      )
+      .addSelect(
+        "SUM(CASE WHEN r.attending = false THEN 1 ELSE 0 END)::int",
+        "notAttending",
+      )
+      .where("r.visitId IN (:...ids)", { ids: visitIds })
+      .groupBy("r.visitId")
+      .getRawMany();
+    for (const r of rows) {
+      map.set(Number(r.visitId), {
+        attending: Number(r.attending) || 0,
+        notAttending: Number(r.notAttending) || 0,
+      });
+    }
+    return map;
+  }
+
+  /**
+   * Bulk-resolve constituency display names for a set of aspirants in one
+   * query per election type, then return a Map keyed by `${electionId}:${constituencyId}`.
+   */
+  private async resolveConstituencyNames(
+    aspirants: Array<{ electionId?: number; constituencyId?: number }>,
+    electionMap: Map<number, { id: number; name: string; type: string }>,
+  ): Promise<Map<string, string>> {
+    const buckets: Record<string, number[]> = {
+      lok_sabha: [],
+      state_assembly: [],
+      municipal_corporation: [],
+      gram_panchayat: [],
+    };
+    for (const a of aspirants) {
+      if (!a.electionId || !a.constituencyId) continue;
+      const t = electionMap.get(a.electionId)?.type;
+      if (t && buckets[t]) buckets[t].push(a.constituencyId);
+    }
+
+    const dedupe = (arr: number[]) => Array.from(new Set(arr));
+
+    const [parls, asms, wards, gps] = await Promise.all([
+      buckets.lok_sabha.length
+        ? this.repo.manager
+            .createQueryBuilder()
+            .select(["pc.id AS id", "pc.name AS name"])
+            .from("parliamentary_constituencies", "pc")
+            .where("pc.id IN (:...ids)", { ids: dedupe(buckets.lok_sabha) })
+            .getRawMany()
+        : Promise.resolve([] as any[]),
+      buckets.state_assembly.length
+        ? this.repo.manager
+            .createQueryBuilder()
+            .select(["ac.id AS id", "ac.name AS name"])
+            .from("assembly_constituencies", "ac")
+            .where("ac.id IN (:...ids)", { ids: dedupe(buckets.state_assembly) })
+            .getRawMany()
+        : Promise.resolve([] as any[]),
+      buckets.municipal_corporation.length
+        ? this.repo.manager
+            .createQueryBuilder()
+            .select(["w.id AS id", "w.name AS name"])
+            .from("wards", "w")
+            .where("w.id IN (:...ids)", {
+              ids: dedupe(buckets.municipal_corporation),
+            })
+            .getRawMany()
+        : Promise.resolve([] as any[]),
+      buckets.gram_panchayat.length
+        ? this.repo.manager
+            .createQueryBuilder()
+            .select([
+              'gp."Sr.No" AS id',
+              'gp."Village Name" AS "villageName"',
+            ])
+            .from("grama_panchayat", "gp")
+            .where('gp."Sr.No" IN (:...ids)', {
+              ids: dedupe(buckets.gram_panchayat),
+            })
+            .getRawMany()
+        : Promise.resolve([] as any[]),
+    ]);
+
+    const lookup = new Map<string, string>();
+    const electionsByType = new Map<string, number[]>();
+    for (const [eid, e] of electionMap)
+      electionsByType.set(
+        e.type,
+        (electionsByType.get(e.type) ?? []).concat(eid),
+      );
+
+    const fillForType = (type: string, rows: any[], nameKey = "name") => {
+      const electionIds = electionsByType.get(type) ?? [];
+      for (const r of rows) {
+        for (const eid of electionIds) {
+          lookup.set(`${eid}:${r.id}`, r[nameKey]);
+        }
+      }
+    };
+
+    fillForType("lok_sabha", parls);
+    fillForType("state_assembly", asms);
+    fillForType("municipal_corporation", wards);
+    fillForType("gram_panchayat", gps, "villageName");
+
+    return lookup;
+  }
 
   async register(dto: CreateAspirantDto, user?: any) {
     if (!user?.id) throw new BadRequestException("Authentication required");
@@ -89,6 +242,14 @@ export class AspirantsService {
       wardId = ward.id;
     }
 
+    // Gender fallback: the JWT-derived `user` doesn't carry the user's stored
+    // gender, so when the DTO omits it we look the value up from the DB.
+    let fallbackGender: string | undefined;
+    if (!dto.gender && user?.id) {
+      const stored = await this.usersService.findById(user.id);
+      fallbackGender = stored?.gender;
+    }
+
     // Build entity data
     const entityData = {
       name: dto.name,
@@ -96,7 +257,7 @@ export class AspirantsService {
       age: dto.age,
       education: dto.education,
       occupation: dto.occupation,
-      gender: dto.gender || (user?.gender ?? undefined),
+      gender: dto.gender || fallbackGender,
       phone: dto.phone,
       address: dto.address,
       manifesto: dto.manifesto,
@@ -212,24 +373,24 @@ export class AspirantsService {
       where: { aspirantId },
       order: { createdAt: "DESC" },
     });
-    const results = await Promise.all(
-      bookings.map(async (b: any) => {
-        const user = await this.usersService.findById(b.voterId);
-        return {
-          id: b.id,
-          createdAt: b.createdAt,
-          updatedAt: b.updatedAt,
-          aspirantId: b.aspirantId,
-          voterId: b.voterId,
-          voterName: user?.name ?? null,
-          message: b.message,
-          preferredAt: b.preferredAt,
-          status: b.status,
-          scheduledAt: b.scheduledAt,
-        };
-      }),
-    );
-    return results;
+    if (!bookings.length) return [];
+
+    const voterIds = Array.from(new Set(bookings.map((b) => b.voterId)));
+    const voters = await this.usersService.findManyByIds(voterIds);
+    const voterMap = new Map<number, User>(voters.map((v) => [v.id, v]));
+
+    return bookings.map((b: any) => ({
+      id: b.id,
+      createdAt: b.createdAt,
+      updatedAt: b.updatedAt,
+      aspirantId: b.aspirantId,
+      voterId: b.voterId,
+      voterName: voterMap.get(b.voterId)?.name ?? null,
+      message: b.message,
+      preferredAt: b.preferredAt,
+      status: b.status,
+      scheduledAt: b.scheduledAt,
+    }));
   }
 
   async createVisit(
@@ -258,10 +419,10 @@ export class AspirantsService {
   async listVisitsForAspirant(aspirantId: number) {
     const visits = await this.visitRepo.find({
       where: { aspirantId },
-      relations: ["responses"],
       order: { startTime: "DESC" },
     });
-    return visits.map((v: any) => ({
+    const counts = await this.getVisitResponseCounts(visits.map((v) => v.id));
+    return visits.map((v) => ({
       id: v.id,
       createdAt: v.createdAt,
       updatedAt: v.updatedAt,
@@ -272,8 +433,7 @@ export class AspirantsService {
       description: v.description,
       location: v.location,
       googleMapsLink: v.googleMapsLink,
-      attendingCount: (v.responses || []).filter((r: any) => r.attending)
-        .length,
+      attendingCount: counts.get(v.id)?.attending ?? 0,
     }));
   }
 
@@ -316,20 +476,14 @@ export class AspirantsService {
     }
     await this.meetingResponseRepo.save(response);
 
-    // Return updated meeting with fresh counts
-    const updated = await this.meetingRepo.findOne({
-      where: { id: meetingId },
-      relations: ["responses"],
-    });
+    const counts = await this.getMeetingResponseCounts([meetingId]);
+    const c = counts.get(meetingId);
     return {
-      id: updated!.id,
+      id: meeting.id,
       meetingId,
       attending,
-      attendingCount: (updated!.responses || []).filter((r: any) => r.attending)
-        .length,
-      notAttendingCount: (updated!.responses || []).filter(
-        (r: any) => !r.attending,
-      ).length,
+      attendingCount: c?.attending ?? 0,
+      notAttendingCount: c?.notAttending ?? 0,
     };
   }
 
@@ -362,7 +516,6 @@ export class AspirantsService {
       .leftJoinAndSelect("aspirant.ward", "ward")
       .leftJoinAndSelect("aspirant.user", "user")
       .leftJoinAndSelect("aspirant.meetings", "meetings")
-      .leftJoinAndSelect("meetings.responses", "meetingResponses")
       .where("ward.number = :wardNumber", { wardNumber })
       .andWhere("aspirant.isActive = :isActive", { isActive: true })
       .orderBy("aspirant.createdAt", "DESC")
@@ -371,24 +524,32 @@ export class AspirantsService {
     if (!aspirants.length) return [];
 
     const ids = aspirants.map((a) => a.id);
+    const meetingIds = aspirants.flatMap(
+      (a) => (a.meetings ?? []).map((m: any) => m.id),
+    );
 
     const [
       allVisits,
       voteCounts,
+      meetingCounts,
       { meetingRatings, visitRatings, overallRatings },
     ] = await Promise.all([
       this.visitRepo.find({
         where: { aspirantId: In(ids) },
-        relations: ["responses"],
         order: { startTime: "DESC" },
       }),
       this.votesService.countByAspirantIds(ids),
+      this.getMeetingResponseCounts(meetingIds),
       this.getActivityRatingsBulk(ids),
     ]);
+    const visitCounts = await this.getVisitResponseCounts(
+      allVisits.map((v) => v.id),
+    );
 
     const visitsByAspirant: Record<number, any[]> = {};
     for (const v of allVisits) {
       if (!visitsByAspirant[v.aspirantId]) visitsByAspirant[v.aspirantId] = [];
+      const c = visitCounts.get(v.id);
       visitsByAspirant[v.aspirantId].push({
         id: v.id,
         createdAt: v.createdAt,
@@ -400,8 +561,7 @@ export class AspirantsService {
         description: v.description,
         location: v.location,
         googleMapsLink: v.googleMapsLink,
-        attendingCount: (v.responses || []).filter((r: any) => r.attending)
-          .length,
+        attendingCount: c?.attending ?? 0,
         rating: visitRatings[v.id] ?? this.emptyRating(),
       });
     }
@@ -416,26 +576,26 @@ export class AspirantsService {
         visits: visitsByAspirant[aspirant.id] ?? [],
         meetings: (aspirant.meetings || [])
           .sort((a: any, b: any) => b.startTime - a.startTime)
-          .map((m: any) => ({
-            id: m.id,
-            createdAt: m.createdAt,
-            updatedAt: m.updatedAt,
-            aspirantId: m.aspirantId,
-            meetingLink: m.meetingLink,
-            platform: m.platform,
-            title: m.title,
-            description: m.description,
-            startTime: m.startTime,
-            endTime: m.endTime,
-            completed: m.completed,
-            notes: m.notes,
-            attendingCount: (m.responses || []).filter((r: any) => r.attending)
-              .length,
-            notAttendingCount: (m.responses || []).filter(
-              (r: any) => !r.attending,
-            ).length,
-            rating: meetingRatings[m.id] ?? this.emptyRating(),
-          })),
+          .map((m: any) => {
+            const c = meetingCounts.get(m.id);
+            return {
+              id: m.id,
+              createdAt: m.createdAt,
+              updatedAt: m.updatedAt,
+              aspirantId: m.aspirantId,
+              meetingLink: m.meetingLink,
+              platform: m.platform,
+              title: m.title,
+              description: m.description,
+              startTime: m.startTime,
+              endTime: m.endTime,
+              completed: m.completed,
+              notes: m.notes,
+              attendingCount: c?.attending ?? 0,
+              notAttendingCount: c?.notAttending ?? 0,
+              rating: meetingRatings[m.id] ?? this.emptyRating(),
+            };
+          }),
         documentStatus: aspirant.getDocumentStatus(),
       };
     });
@@ -451,7 +611,6 @@ export class AspirantsService {
       .leftJoinAndSelect("aspirant.ward", "ward")
       .leftJoinAndSelect("aspirant.user", "user")
       .leftJoinAndSelect("aspirant.meetings", "meetings")
-      .leftJoinAndSelect("meetings.responses", "meetingResponses")
       .where("aspirant.electionId = :electionId", { electionId })
       .andWhere("aspirant.constituencyId = :constituencyId", { constituencyId })
       .andWhere("aspirant.isActive = :isActive", { isActive: true })
@@ -464,22 +623,28 @@ export class AspirantsService {
       return [this.getDemoAspirant(electionId, constituencyId)];
 
     const ids = aspirants.map((a) => a.id);
+    const meetingIds = aspirants.flatMap(
+      (a) => (a.meetings ?? []).map((m: any) => m.id),
+    );
 
     const [
       allVisits,
       voteCounts,
+      meetingCounts,
       { meetingRatings, visitRatings, overallRatings },
     ] = await Promise.all([
       this.visitRepo.find({
         where: { aspirantId: In(ids) },
-        relations: ["responses"],
         order: { startTime: "DESC" },
       }),
       this.votesService.countByAspirantIds(ids),
+      this.getMeetingResponseCounts(meetingIds),
       this.getActivityRatingsBulk(ids),
     ]);
+    const visitCounts = await this.getVisitResponseCounts(
+      allVisits.map((v) => v.id),
+    );
 
-    // If userId is passed, fetch which meetings/visits this user has rated
     const userRatedMeetings = new Set<number>();
     const userRatedVisits = new Set<number>();
     if (userId) {
@@ -495,6 +660,7 @@ export class AspirantsService {
     const visitsByAspirant: Record<number, any[]> = {};
     for (const v of allVisits) {
       if (!visitsByAspirant[v.aspirantId]) visitsByAspirant[v.aspirantId] = [];
+      const c = visitCounts.get(v.id);
       const visitData: any = {
         id: v.id,
         createdAt: v.createdAt,
@@ -506,8 +672,7 @@ export class AspirantsService {
         description: v.description,
         location: v.location,
         googleMapsLink: v.googleMapsLink,
-        attendingCount: (v.responses || []).filter((r: any) => r.attending)
-          .length,
+        attendingCount: c?.attending ?? 0,
         rating: visitRatings[v.id] ?? this.emptyRating(),
       };
       if (userId) visitData.isRated = userRatedVisits.has(v.id);
@@ -535,6 +700,7 @@ export class AspirantsService {
         meetings: (aspirant.meetings || [])
           .sort((a: any, b: any) => b.startTime - a.startTime)
           .map((m: any) => {
+            const c = meetingCounts.get(m.id);
             const meetingData: any = {
               id: m.id,
               createdAt: m.createdAt,
@@ -548,12 +714,8 @@ export class AspirantsService {
               endTime: m.endTime,
               completed: m.completed,
               notes: m.notes,
-              attendingCount: (m.responses || []).filter(
-                (r: any) => r.attending,
-              ).length,
-              notAttendingCount: (m.responses || []).filter(
-                (r: any) => !r.attending,
-              ).length,
+              attendingCount: c?.attending ?? 0,
+              notAttendingCount: c?.notAttending ?? 0,
               rating: meetingRatings[m.id] ?? this.emptyRating(),
             };
             if (userId) meetingData.isRated = userRatedMeetings.has(m.id);
@@ -574,65 +736,76 @@ export class AspirantsService {
 
     const aspirant = await this.repo.findOne({
       where: { id },
-      relations: { ward: true, user: true, meetings: { responses: true } } as any,
+      relations: { ward: true, user: true, meetings: true } as any,
     });
     if (!aspirant) return null;
 
-    const { meetingRatings, visitRatings, overallRatings } =
-      await this.getActivityRatingsBulk([id]);
+    const meetingIds = (aspirant.meetings || []).map((m: any) => m.id);
     const visits = await this.visitRepo.find({
       where: { aspirantId: id },
-      relations: ["responses"],
       order: { startTime: "DESC" },
     });
 
+    const [
+      { meetingRatings, visitRatings, overallRatings },
+      meetingCounts,
+      visitCounts,
+    ] = await Promise.all([
+      this.getActivityRatingsBulk([id]),
+      this.getMeetingResponseCounts(meetingIds),
+      this.getVisitResponseCounts(visits.map((v) => v.id)),
+    ]);
+
     const mappedMeetings = (aspirant.meetings || [])
       .sort((a: any, b: any) => b.startTime - a.startTime)
-      .map((m: any) => ({
-        id: m.id,
-        createdAt: m.createdAt,
-        updatedAt: m.updatedAt,
-        aspirantId: m.aspirantId,
-        meetingLink: m.meetingLink,
-        platform: m.platform,
-        title: m.title,
-        description: m.description,
-        startTime: m.startTime,
-        endTime: m.endTime,
-        completed: m.completed,
-        notes: m.notes,
-        attendingCount: (m.responses || []).filter((r: any) => r.attending)
-          .length,
-        notAttendingCount: (m.responses || []).filter((r: any) => !r.attending)
-          .length,
-        rating: meetingRatings[m.id] ?? this.emptyRating(),
-      }));
+      .map((m: any) => {
+        const c = meetingCounts.get(m.id);
+        return {
+          id: m.id,
+          createdAt: m.createdAt,
+          updatedAt: m.updatedAt,
+          aspirantId: m.aspirantId,
+          meetingLink: m.meetingLink,
+          platform: m.platform,
+          title: m.title,
+          description: m.description,
+          startTime: m.startTime,
+          endTime: m.endTime,
+          completed: m.completed,
+          notes: m.notes,
+          attendingCount: c?.attending ?? 0,
+          notAttendingCount: c?.notAttending ?? 0,
+          rating: meetingRatings[m.id] ?? this.emptyRating(),
+        };
+      });
 
-    const mappedVisits = visits.map((v: any) => ({
-      id: v.id,
-      createdAt: v.createdAt,
-      updatedAt: v.updatedAt,
-      aspirantId: v.aspirantId,
-      startTime: v.startTime,
-      endTime: v.endTime,
-      title: v.title,
-      description: v.description,
-      location: v.location,
-      googleMapsLink: v.googleMapsLink,
-      attendingCount: (v.responses || []).filter((r: any) => r.attending)
-        .length,
-      rating: visitRatings[v.id] ?? this.emptyRating(),
-    }));
+    const mappedVisits = visits.map((v) => {
+      const c = visitCounts.get(v.id);
+      return {
+        id: v.id,
+        createdAt: v.createdAt,
+        updatedAt: v.updatedAt,
+        aspirantId: v.aspirantId,
+        startTime: v.startTime,
+        endTime: v.endTime,
+        title: v.title,
+        description: v.description,
+        location: v.location,
+        googleMapsLink: v.googleMapsLink,
+        attendingCount: c?.attending ?? 0,
+        rating: visitRatings[v.id] ?? this.emptyRating(),
+      };
+    });
 
-    if (
-      (!aspirant.gender || aspirant.gender === "") &&
-      currentUser &&
-      currentUser.gender
-    ) {
-      aspirant.gender = currentUser.gender;
+    // Fallback: if the aspirant has no gender on file, surface the viewing
+    // user's gender. The JWT-derived currentUser no longer carries gender,
+    // so we look it up here only when the fallback is actually needed.
+    if ((!aspirant.gender || aspirant.gender === "") && currentUser?.id) {
+      const viewer = await this.usersService.findById(currentUser.id);
+      if (viewer?.gender) aspirant.gender = viewer.gender;
     }
 
-    // Resolve election and constituency names
+    // Resolve election + constituency names in a single bulk pass.
     let electionName: string | null = null;
     let constituencyName: string | null = null;
     if (aspirant.electionId) {
@@ -642,25 +815,17 @@ export class AspirantsService {
         );
         electionName = election.name;
         if (aspirant.constituencyId) {
-          if (election.type === "lok_sabha") {
-            const c = await this.repo.manager.findOne("Parliamentary", {
-              where: { id: aspirant.constituencyId },
-            } as any);
-            if (c) constituencyName = (c as any).name;
-          } else if (election.type === "state_assembly") {
-            const c = await this.repo.manager.findOne("Assembly", {
-              where: { id: aspirant.constituencyId },
-            } as any);
-            if (c) constituencyName = (c as any).name;
-          } else if (election.type === "municipal_corporation") {
-            const w = await this.wardsService.findOne(aspirant.constituencyId);
-            if (w) constituencyName = w.name;
-          } else if (election.type === "gram_panchayat") {
-            const gp = await this.repo.manager.findOne("GramaPanchayat", {
-              where: { srNo: aspirant.constituencyId },
-            } as any);
-            if (gp) constituencyName = (gp as any).villageName;
-          }
+          const electionMap = new Map<
+            number,
+            { id: number; name: string; type: string }
+          >([[election.id, { id: election.id, name: election.name, type: election.type }]]);
+          const lookup = await this.resolveConstituencyNames(
+            [{ electionId: aspirant.electionId, constituencyId: aspirant.constituencyId }],
+            electionMap,
+          );
+          constituencyName =
+            lookup.get(`${aspirant.electionId}:${aspirant.constituencyId}`) ??
+            null;
         }
       } catch {
         /* skip if not found */
@@ -937,57 +1102,30 @@ export class AspirantsService {
     if (!aspirants.length)
       return { data: [], total, page, limit, totalPages: 0 };
 
-    // Collect unique electionIds and resolve election names
+    // Collect unique electionIds and bulk-resolve elections in a single IN-query.
     const electionIds = [
       ...new Set(aspirants.map((a) => a.electionId).filter(Boolean)),
     ] as number[];
-    const elections = await Promise.all(
-      electionIds.map((id) =>
-        this.electionsService.findById(id).catch(() => null),
-      ),
+    const elections = electionIds.length
+      ? await this.repo.manager
+          .getRepository("Election")
+          .findBy({ id: In(electionIds) } as any)
+      : [];
+
+    const electionNameMap = new Map<number, string>();
+    const electionMap = new Map<
+      number,
+      { id: number; name: string; type: string }
+    >();
+    for (const e of elections as any[]) {
+      electionNameMap.set(e.id, e.name);
+      electionMap.set(e.id, { id: e.id, name: e.name, type: e.type });
+    }
+
+    const constituencyLookup = await this.resolveConstituencyNames(
+      aspirants,
+      electionMap,
     );
-    const electionMap: Record<number, string> = {};
-    for (const e of elections) {
-      if (e) electionMap[e.id] = e.name;
-    }
-
-    // Resolve constituency names based on election type
-    const electionTypeMap: Record<number, string> = {};
-    for (const e of elections) {
-      if (e) electionTypeMap[e.id] = e.type;
-    }
-
-    const constituencyNames: Record<string, string> = {};
-    for (const a of aspirants) {
-      if (!a.electionId || !a.constituencyId) continue;
-      const key = `${a.electionId}:${a.constituencyId}`;
-      if (constituencyNames[key]) continue;
-
-      const type = electionTypeMap[a.electionId];
-      try {
-        if (type === "lok_sabha") {
-          const c = await this.repo.manager.findOne("Parliamentary", {
-            where: { id: a.constituencyId },
-          } as any);
-          if (c) constituencyNames[key] = (c as any).name;
-        } else if (type === "state_assembly") {
-          const c = await this.repo.manager.findOne("Assembly", {
-            where: { id: a.constituencyId },
-          } as any);
-          if (c) constituencyNames[key] = (c as any).name;
-        } else if (type === "municipal_corporation") {
-          const w = await this.wardsService.findOne(a.constituencyId);
-          if (w) constituencyNames[key] = w.name;
-        } else if (type === "gram_panchayat") {
-          const gp = await this.repo.manager.findOne("GramaPanchayat", {
-            where: { srNo: a.constituencyId },
-          } as any);
-          if (gp) constituencyNames[key] = (gp as any).villageName;
-        }
-      } catch {
-        /* skip if not found */
-      }
-    }
 
     const data = aspirants.map((a) => ({
       id: a.id,
@@ -997,11 +1135,14 @@ export class AspirantsService {
       selfieUrl: a.selfieUrl ?? null,
       isBlocked: a.user?.isBlocked ?? false,
       electionId: a.electionId,
-      electionName: a.electionId ? (electionMap[a.electionId] ?? null) : null,
+      electionName: a.electionId
+        ? (electionNameMap.get(a.electionId) ?? null)
+        : null,
       constituencyId: a.constituencyId,
       constituencyName:
         a.electionId && a.constituencyId
-          ? (constituencyNames[`${a.electionId}:${a.constituencyId}`] ?? null)
+          ? (constituencyLookup.get(`${a.electionId}:${a.constituencyId}`) ??
+            null)
           : null,
     }));
 

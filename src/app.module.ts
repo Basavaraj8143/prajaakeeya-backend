@@ -112,11 +112,35 @@ function resolveRedisUrl(): string | undefined {
     TypeOrmModule.forRoot({
       type: "postgres",
       url: process.env.DATABASE_URL,
-      synchronize: true,
+      synchronize: process.env.TYPEORM_SYNCHRONIZE === "true",
+      migrationsRun: process.env.NODE_ENV === "production",
+      // Only pick up proper MigrationInterface files (timestamp-prefixed).
+      // Legacy standalone scripts (`add-*`, `migrate-*`, `run-*`) have
+      // self-executing top-level code and must NOT be loaded by TypeORM.
+      migrations: ["dist/migrations/[0-9]*.js"],
       ssl:
         process.env.NODE_ENV === "production"
-          ? { rejectUnauthorized: false }
+          ? (() => {
+              const caPath =
+                process.env.RDS_CA_PATH || "/opt/rds/global-bundle.pem";
+              try {
+                return { ca: fs.readFileSync(caPath).toString() };
+              } catch {
+                // CA bundle not present — fall back to TLS without verification
+                // only when RDS_SSL_INSECURE=true is explicitly set.
+                if (process.env.RDS_SSL_INSECURE === "true") {
+                  return { rejectUnauthorized: false };
+                }
+                return true;
+              }
+            })()
           : false,
+      extra: {
+        max: parseInt(process.env.DB_POOL_MAX || "10"),
+        connectionTimeoutMillis: 5000,
+        idleTimeoutMillis: 30_000,
+        application_name: "prajaakeeya-api",
+      },
       entities: [
         User,
         Ward,

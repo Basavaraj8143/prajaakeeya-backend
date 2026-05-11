@@ -167,8 +167,9 @@ export class VotesService {
     const window = await this.getActiveVotingWindow();
     if (!window) return false;
 
-    const now = new Date();
-    return now >= window.startTime && now <= window.endTime;
+    // startTime / endTime arrive as epoch-ms numbers via the entity transformer.
+    const nowMs = Date.now();
+    return nowMs >= Number(window.startTime) && nowMs <= Number(window.endTime);
   }
 
   async checkVotingWindow() {
@@ -179,17 +180,19 @@ export class VotesService {
         throw new BadRequestException("No voting window is currently active");
       }
 
-      const now = new Date();
-      if (now < window.startTime) {
+      const nowMs = Date.now();
+      const startsAt = Number(window.startTime);
+      const closedAt = Number(window.endTime);
+      if (nowMs < startsAt) {
         throw new BadRequestException({
           message: "Voting has not started yet.",
-          startsAt: window.startTime.getTime(),
+          startsAt,
         });
       }
-      if (now > window.endTime) {
+      if (nowMs > closedAt) {
         throw new BadRequestException({
           message: "Voting has ended.",
-          closedAt: window.endTime.getTime(),
+          closedAt,
         });
       }
     }

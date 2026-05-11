@@ -26,6 +26,18 @@ export class GramaPanchayatService {
   }
 
   async findAll(filters?: GramaPanchayatFilters) {
+    // Refuse unbounded scans of the 30k-row table — callers must narrow
+    // by at least state+district+taluk before fetching the village list.
+    const hasFilters = !!(
+      filters?.state ||
+      filters?.district ||
+      filters?.taluk ||
+      filters?.gpName
+    );
+    if (!hasFilters) {
+      return [];
+    }
+
     const qb = this.repo
       .createQueryBuilder("gp")
       .select([

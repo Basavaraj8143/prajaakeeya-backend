@@ -43,7 +43,9 @@ async function migrate() {
   console.log("✓ Migration completed successfully!");
 }
 
-migrate().catch((error) => {
-  console.error("Error running migration:", error);
-  process.exit(1);
-});
+if (require.main === module) {
+  migrate().catch((error) => {
+    console.error("Error running migration:", error);
+    process.exit(1);
+  });
+}

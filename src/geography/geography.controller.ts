@@ -1,4 +1,13 @@
-import { Body, Controller, Get, Post, Param, UseGuards } from "@nestjs/common";
+import {
+  Body,
+  Controller,
+  Get,
+  Post,
+  Param,
+  UseGuards,
+  UseInterceptors,
+} from "@nestjs/common";
+import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import {
   ApiTags,
   ApiOperation,
@@ -12,6 +21,8 @@ import { CreateStateDto } from "./dto/create-state.dto";
 
 @ApiTags("Geography")
 @Controller("geography")
+@UseInterceptors(CacheInterceptor)
+@CacheTTL(3600_000)
 export class GeographyController {
   constructor(private readonly geographyService: GeographyService) {}
 

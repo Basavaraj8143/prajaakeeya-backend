@@ -2,14 +2,21 @@ import { NestFactory } from "@nestjs/core";
 import { AppModule } from "./app.module";
 import { ValidationPipe } from "@nestjs/common";
 import { SwaggerModule, DocumentBuilder } from "@nestjs/swagger";
-import { DateToTimestampInterceptor } from "./common/interceptors/date-to-timestamp.interceptor";
 import helmet from "helmet";
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule);
 
-  // Security headers
-  app.use(helmet());
+  // Security headers. CSP is disabled because this process serves only the
+  // JSON API; Swagger UI (when enabled in non-prod) hosts its own assets and
+  // would break under a default-strict CSP.
+  app.use(
+    helmet({
+      contentSecurityPolicy:
+        process.env.NODE_ENV === "production" ? undefined : false,
+      crossOriginResourcePolicy: { policy: "cross-origin" },
+    }),
+  );
 
   app.getHttpAdapter().getInstance().set("trust proxy", 1);
   app.setGlobalPrefix("api");
@@ -20,7 +27,6 @@ async function bootstrap() {
       forbidNonWhitelisted: true,
     }),
   );
-  app.useGlobalInterceptors(new DateToTimestampInterceptor());
 
   // CORS: restrict origins based on environment
   const corsEnv =

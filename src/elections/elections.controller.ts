@@ -1,4 +1,5 @@
-import { Controller, Get, Param, Query } from "@nestjs/common";
+import { Controller, Get, Param, Query, UseInterceptors } from "@nestjs/common";
+import { CacheInterceptor, CacheTTL } from "@nestjs/cache-manager";
 import {
   ApiTags,
   ApiOperation,
@@ -11,6 +12,8 @@ import { ElectionType } from "./election.entity";
 
 @ApiTags("Elections")
 @Controller("elections")
+@UseInterceptors(CacheInterceptor)
+@CacheTTL(3600_000)
 export class ElectionsController {
   constructor(private readonly electionsService: ElectionsService) {}
 

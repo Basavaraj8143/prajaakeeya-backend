@@ -1,5 +1,5 @@
 import { Column, Entity, ManyToOne, JoinColumn } from "typeorm";
-import { BaseEntity } from "../common/base.entity";
+import { BaseEntity, dateToEpoch } from "../common/base.entity";
 import { User } from "./user.entity";
 
 export type ReportStatus = "pending" | "resolved" | "rejected";
@@ -36,8 +36,13 @@ export class Report extends BaseEntity {
   @Column({ name: "admin_notes", type: "text", nullable: true })
   adminNotes?: string;
 
-  @Column({ name: "resolved_at", nullable: true })
-  resolvedAt?: Date;
+  @Column({
+    name: "resolved_at",
+    type: "timestamp",
+    nullable: true,
+    transformer: dateToEpoch as any,
+  })
+  resolvedAt?: any;
 
   @Column({ name: "resolved_by_id", nullable: true })
   resolvedById?: number;
