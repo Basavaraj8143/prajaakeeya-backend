@@ -71,7 +71,11 @@ export class UsersController {
   @Post("report")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @UseInterceptors(FileInterceptor("attachment"))
+  @UseInterceptors(
+    FileInterceptor("attachment", {
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB
+    }),
+  )
   @ApiConsumes("multipart/form-data")
   @ApiOperation({
     summary: "Report a voter or aspirant",

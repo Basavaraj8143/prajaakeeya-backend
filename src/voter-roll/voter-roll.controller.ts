@@ -117,6 +117,7 @@ export class VoterRollController {
   @UseInterceptors(
     FileInterceptor("file", {
       storage: memoryStorage(),
+      limits: { fileSize: 10 * 1024 * 1024, files: 1 }, // 10 MB
       fileFilter: (_req, file, cb) => {
         if (!file.originalname.match(/\.(xlsx|xls)$/i)) {
           return cb(
