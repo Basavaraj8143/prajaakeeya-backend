@@ -118,20 +118,36 @@ function resolveRedisUrl(): string | undefined {
       // Legacy standalone scripts (`add-*`, `migrate-*`, `run-*`) have
       // self-executing top-level code and must NOT be loaded by TypeORM.
       migrations: ["dist/migrations/[0-9]*.js"],
+      // SSL applies to every non-development environment. RDS has
+      // `sslmode=require` in the URL, so we have to give pg an explicit ssl
+      // object — passing `ssl: false` doesn't suppress the SSL negotiation
+      // forced by the URL, it just leaves Node falling back to its default
+      // CA trust store (which doesn't include AWS RDS internal CAs), which
+      // is exactly the "self-signed certificate in certificate chain"
+      // failure mode.
+      //
+      // Resolution order:
+      //   1. RDS_SSL_INSECURE=true → encrypted but unverified (fine inside a VPC).
+      //   2. CA bundle on disk     → encrypted AND verified (most secure).
+      //   3. Neither               → throw loudly with instructions.
       ssl:
-        process.env.NODE_ENV === "production"
+        process.env.NODE_ENV !== "development"
           ? (() => {
+              if (process.env.RDS_SSL_INSECURE === "true") {
+                return { rejectUnauthorized: false };
+              }
               const caPath =
                 process.env.RDS_CA_PATH || "/opt/rds/global-bundle.pem";
               try {
                 return { ca: fs.readFileSync(caPath).toString() };
               } catch {
-                // CA bundle not present — fall back to TLS without verification
-                // only when RDS_SSL_INSECURE=true is explicitly set.
-                if (process.env.RDS_SSL_INSECURE === "true") {
-                  return { rejectUnauthorized: false };
-                }
-                return true;
+                throw new Error(
+                  `Database SSL is not configured. Either install the AWS RDS ` +
+                    `CA bundle at ${caPath} (download from ` +
+                    `https://truststore.pki.rds.amazonaws.com/global/global-bundle.pem) ` +
+                    `or set RDS_SSL_INSECURE=true in your .env to use TLS ` +
+                    `without cert verification.`,
+                );
               }
             })()
           : false,
