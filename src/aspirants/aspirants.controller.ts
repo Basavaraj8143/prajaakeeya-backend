@@ -169,21 +169,29 @@ export class AspirantsController {
   }
 
   @Post("meeting")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("admin")
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
   @ApiOperation({
-    summary: "Set meeting link for multiple aspirants (admin only)",
+    summary: "Set meeting link for one or more aspirants",
+    description:
+      "Admins may set meeting links for any set of aspirants. Non-admin " +
+      "callers may only set the meeting link on their own aspirant — every " +
+      "id in `aspirantIds` must match the caller's aspirant. Cross-tenant " +
+      "use returns 403.",
   })
   @ApiResponse({
     status: 200,
     description: "Meeting links set successfully for all aspirants",
   })
   @ApiResponse({ status: 401, description: "Unauthorized" })
-  @ApiResponse({ status: 403, description: "Admin role required" })
+  @ApiResponse({
+    status: 403,
+    description: "Non-admin tried to set meeting for another aspirant",
+  })
   @ApiResponse({ status: 404, description: "One or more aspirants not found" })
-  setMeeting(@Body() dto: SetMeetingLinkDto) {
+  setMeeting(@CurrentUser() user: any, @Body() dto: SetMeetingLinkDto) {
     return this.aspirantsService.setMeetingLinkForMultiple(
+      user,
       dto.aspirantIds,
       dto.meetingLink,
       dto.startTime,
@@ -211,11 +219,13 @@ export class AspirantsController {
     example: 12,
   })
   completeMeeting(
+    @CurrentUser() user: any,
     @Param("id") id: string,
     @Param("meetingId") meetingId: string,
     @Body() dto: CompleteMeetingDto,
   ) {
     return this.aspirantsService.completeMeeting(
+      user,
       Number(id),
       Number(meetingId),
       dto.notes,
@@ -282,7 +292,9 @@ export class AspirantsController {
   @Post(":id/visits")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Aspirant posts a visit for voters" })
+  @ApiOperation({
+    summary: "Aspirant posts a visit for voters (owner or admin only)",
+  })
   @ApiParam({
     name: "id",
     type: "number",
@@ -290,8 +302,14 @@ export class AspirantsController {
     example: 5,
   })
   @ApiResponse({ status: 201, description: "Visit created" })
-  createVisit(@Param("id") id: string, @Body() dto: CreateVisitDto) {
+  @ApiResponse({ status: 403, description: "Not the aspirant owner" })
+  createVisit(
+    @CurrentUser() user: any,
+    @Param("id") id: string,
+    @Body() dto: CreateVisitDto,
+  ) {
     return this.aspirantsService.createVisit(
+      user,
       Number(id),
       dto.startTime,
       dto.endTime,
@@ -380,21 +398,31 @@ export class AspirantsController {
   }
 
   @Delete("meeting")
-  @UseGuards(JwtAuthGuard, RolesGuard)
-  @Roles("admin")
+  @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Delete multiple meetings by IDs (admin only)" })
+  @ApiOperation({
+    summary: "Delete multiple meetings by IDs",
+    description:
+      "Admins may delete any meetings. Non-admin callers may only delete " +
+      "meetings whose aspirant is themselves — every meeting whose ID is in " +
+      "the list must belong to an aspirant the caller owns.",
+  })
   @ApiResponse({ status: 200, description: "Meetings deleted successfully" })
   @ApiResponse({ status: 401, description: "Unauthorized" })
-  @ApiResponse({ status: 403, description: "Admin role required" })
-  deleteMeetings(@Body() dto: DeleteMeetingsDto) {
-    return this.aspirantsService.deleteMeetings(dto.meetingIds);
+  @ApiResponse({
+    status: 403,
+    description: "Non-admin tried to delete another aspirant's meeting",
+  })
+  deleteMeetings(@CurrentUser() user: any, @Body() dto: DeleteMeetingsDto) {
+    return this.aspirantsService.deleteMeetings(user, dto.meetingIds);
   }
 
   @Delete(":id/visits/:visitId")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Delete a single visit for an aspirant" })
+  @ApiOperation({
+    summary: "Delete a single visit for an aspirant (owner or admin only)",
+  })
   @ApiParam({
     name: "id",
     type: "number",
@@ -408,8 +436,17 @@ export class AspirantsController {
     example: 10,
   })
   @ApiResponse({ status: 200, description: "Visit deleted" })
-  deleteVisit(@Param("id") id: string, @Param("visitId") visitId: string) {
-    return this.aspirantsService.deleteVisit(Number(id), Number(visitId));
+  @ApiResponse({ status: 403, description: "Not the aspirant owner" })
+  deleteVisit(
+    @CurrentUser() user: any,
+    @Param("id") id: string,
+    @Param("visitId") visitId: string,
+  ) {
+    return this.aspirantsService.deleteVisit(
+      user,
+      Number(id),
+      Number(visitId),
+    );
   }
 
   @Post("meetings/:meetingId/rate")

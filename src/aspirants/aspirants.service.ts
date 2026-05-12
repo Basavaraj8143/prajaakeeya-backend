@@ -2,6 +2,7 @@ import {
   Injectable,
   NotFoundException,
   BadRequestException,
+  ForbiddenException,
   Inject,
   forwardRef,
 } from "@nestjs/common";
@@ -49,6 +50,49 @@ export class AspirantsService {
     @Inject(forwardRef(() => VotesService))
     private readonly votesService: VotesService,
   ) {}
+
+  /**
+   * Authorisation helper for aspirant-owned operations. Admins can modify
+   * any aspirant; non-admins must be the aspirant's owner (aspirant.userId
+   * matches the caller's user.id). Throws ForbiddenException otherwise so
+   * controllers don't have to repeat the check.
+   */
+  private async assertCanModifyAspirant(
+    user: { id: number; role?: string } | undefined,
+    aspirantId: number,
+  ): Promise<void> {
+    if (user?.role === "admin") return;
+    if (!user?.id) throw new ForbiddenException("Authentication required");
+    const aspirant = await this.repo.findOne({
+      where: { id: aspirantId },
+    });
+    if (!aspirant) throw new NotFoundException("Aspirant not found");
+    if (aspirant.userId !== user.id) {
+      throw new ForbiddenException("Not authorised to modify this aspirant");
+    }
+  }
+
+  /**
+   * Batched version of assertCanModifyAspirant. Admins always pass; for
+   * non-admins, every id in the list must belong to the caller.
+   */
+  private async assertCanModifyAspirants(
+    user: { id: number; role?: string } | undefined,
+    aspirantIds: number[],
+  ): Promise<void> {
+    if (user?.role === "admin") return;
+    if (!user?.id) throw new ForbiddenException("Authentication required");
+    if (!aspirantIds.length) return;
+    const aspirants = await this.repo.findBy({ id: In(aspirantIds) });
+    const foreign = aspirants.filter((a) => a.userId !== user.id);
+    if (foreign.length > 0) {
+      throw new ForbiddenException(
+        `Not authorised to modify aspirant(s): ${foreign
+          .map((a) => a.id)
+          .join(", ")}`,
+      );
+    }
+  }
 
   /** Aggregated meeting response counts by meeting id, in one query. */
   private async getMeetingResponseCounts(
@@ -394,6 +438,7 @@ export class AspirantsService {
   }
 
   async createVisit(
+    user: { id: number; role?: string } | undefined,
     aspirantId: number,
     startTime: number,
     endTime?: number,
@@ -402,8 +447,9 @@ export class AspirantsService {
     location?: string,
     googleMapsLink?: string,
   ) {
-    const aspirant = await this.repo.findOne({ where: { id: aspirantId } });
-    if (!aspirant) throw new NotFoundException("Aspirant not found");
+    // Only the aspirant themselves (or admins) can create visits.
+    await this.assertCanModifyAspirant(user, aspirantId);
+
     const visit = this.visitRepo.create({
       aspirantId,
       startTime,
@@ -874,6 +920,7 @@ export class AspirantsService {
   }
 
   async setMeetingLinkForMultiple(
+    user: { id: number; role?: string } | undefined,
     aspirantIds: number[],
     meetingLink: string,
     startTime: number,
@@ -892,6 +939,11 @@ export class AspirantsService {
         `Aspirants not found: ${missingIds.join(", ")}`,
       );
     }
+
+    // Authorisation: admins may set meetings for any aspirant. Non-admins
+    // may only set meetings on their OWN aspirant. The helper enforces this
+    // for every id in the request.
+    await this.assertCanModifyAspirants(user, aspirantIds);
 
     // Create meetings for all aspirants
     const meetings = aspirantIds.map((aspirantId) =>
@@ -915,7 +967,15 @@ export class AspirantsService {
     });
   }
 
-  async completeMeeting(aspirantId: number, meetingId: number, notes: string) {
+  async completeMeeting(
+    user: { id: number; role?: string } | undefined,
+    aspirantId: number,
+    meetingId: number,
+    notes: string,
+  ) {
+    // Aspirant must own the meeting (or be admin).
+    await this.assertCanModifyAspirant(user, aspirantId);
+
     const meeting = await this.meetingRepo.findOne({
       where: { id: meetingId, aspirantId },
     });
@@ -926,11 +986,23 @@ export class AspirantsService {
     return this.meetingRepo.findOne({ where: { id: meetingId } });
   }
 
-  async deleteMeetings(meetingIds: number[]) {
+  async deleteMeetings(
+    user: { id: number; role?: string } | undefined,
+    meetingIds: number[],
+  ) {
     if (!meetingIds || meetingIds.length === 0) return { deleted: 0 };
     // verify meetings exist
     const meetings = await this.meetingRepo.findByIds(meetingIds);
     if (meetings.length === 0) return { deleted: 0 };
+
+    // Authorisation: meetings are addressed by ID, but they belong to an
+    // aspirant. Resolve the aspirant IDs once and require the caller to own
+    // (or be admin over) every aspirant whose meetings are being deleted.
+    const aspirantIds = Array.from(
+      new Set(meetings.map((m) => m.aspirantId)),
+    );
+    await this.assertCanModifyAspirants(user, aspirantIds);
+
     const foundIds = meetings.map((m) => m.id);
     const toDelete = meetingIds.filter((id) => foundIds.includes(id));
     if (toDelete.length === 0) return { deleted: 0 };
@@ -939,7 +1011,14 @@ export class AspirantsService {
     return { deleted: toDelete.length };
   }
 
-  async deleteVisit(aspirantId: number, visitId: number) {
+  async deleteVisit(
+    user: { id: number; role?: string } | undefined,
+    aspirantId: number,
+    visitId: number,
+  ) {
+    // Only the aspirant themselves (or admins) can delete their visits.
+    await this.assertCanModifyAspirant(user, aspirantId);
+
     const visit = await this.visitRepo.findOne({
       where: { id: visitId, aspirantId },
     });
@@ -948,8 +1027,14 @@ export class AspirantsService {
     return { deleted: 1 };
   }
 
-  async deleteVisits(aspirantId: number, visitIds: number[]) {
+  async deleteVisits(
+    user: { id: number; role?: string } | undefined,
+    aspirantId: number,
+    visitIds: number[],
+  ) {
     if (!visitIds || visitIds.length === 0) return { deleted: 0 };
+    await this.assertCanModifyAspirant(user, aspirantId);
+
     const visits = await this.visitRepo.findByIds(visitIds);
     // ensure they belong to aspirant
     const owned = visits
