@@ -1094,12 +1094,23 @@ export class AspirantsService {
     const aspirant = await this.repo.findOne({ where: { userId } });
     if (!aspirant)
       throw new NotFoundException("No aspirant profile found for this user");
-    // Check if voting is currently allowed via VotesService
+
+    // Only block withdrawal if there's an active voting window for THIS
+    // aspirant's election type. A lok_sabha aspirant should still be
+    // able to withdraw while a municipal_corporation window is open
+    // (and vice versa).
     const votingAllowed = await this.votesService.isVotingAllowed();
     if (votingAllowed) {
-      throw new BadRequestException(
-        "Cannot withdraw candidacy while voting is allowed",
-      );
+      const activeWindow = await this.votesService.getActiveVotingWindow();
+      if (
+        activeWindow?.electionId &&
+        aspirant.electionId &&
+        activeWindow.electionId === aspirant.electionId
+      ) {
+        throw new BadRequestException(
+          "Cannot withdraw candidacy while voting is open for this election",
+        );
+      }
     }
 
     await this.repo.update(aspirant.id, {
