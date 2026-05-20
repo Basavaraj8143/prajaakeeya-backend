@@ -1,4 +1,4 @@
-import { Module, Global } from "@nestjs/common";
+import { Module, Global, forwardRef } from "@nestjs/common";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ConfigModule } from "@nestjs/config";
 import { MulterModule } from "@nestjs/platform-express";
@@ -10,6 +10,7 @@ import { Aspirant } from "../aspirants/aspirant.entity";
 import { AdminDocument } from "../admin/admin-document.entity";
 import { UserSignedDocument } from "../users/user-signed-document.entity";
 import { MAX_UPLOAD_BYTES } from "./upload.constants";
+import { AspirantsModule } from "../aspirants/aspirants.module";
 
 @Global()
 @Module({
@@ -26,6 +27,7 @@ import { MAX_UPLOAD_BYTES } from "./upload.constants";
         fileSize: MAX_UPLOAD_BYTES,
       },
     }),
+    forwardRef(() => AspirantsModule),
   ],
   controllers: [MediaController],
   providers: [MediaService, S3Service],

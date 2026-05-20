@@ -1,7 +1,9 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
+  forwardRef,
 } from "@nestjs/common";
 import { InjectRepository } from "@nestjs/typeorm";
 import { Repository } from "typeorm";
@@ -11,6 +13,7 @@ import { Aspirant } from "../../aspirants/aspirant.entity";
 import { AdminDocument } from "../../admin/admin-document.entity";
 import { UserSignedDocument } from "../../users/user-signed-document.entity";
 import { VerifyDocumentDto } from "../dto/media-upload.dto";
+import { AspirantsService } from "../../aspirants/aspirants.service";
 
 @Injectable()
 export class MediaService {
@@ -23,6 +26,8 @@ export class MediaService {
     private readonly adminDocRepo: Repository<AdminDocument>,
     @InjectRepository(UserSignedDocument)
     private readonly userSignedDocRepo: Repository<UserSignedDocument>,
+    @Inject(forwardRef(() => AspirantsService))
+    private readonly aspirantsService: AspirantsService,
   ) {}
 
   async uploadProfilePicture(
@@ -68,6 +73,11 @@ export class MediaService {
     if (!aspirant) {
       throw new NotFoundException("Aspirant not found");
     }
+
+    // Snapshot the document-completion state before this upload so we can
+    // detect the first incomplete→complete transition and fan out the
+    // "new aspirant registered" notification exactly once at that point.
+    const wasComplete = aspirant.hasAllRequiredDocuments();
 
     const url = await this.s3Service.uploadFile(
       file,
@@ -160,6 +170,15 @@ export class MediaService {
     if (aspirant.hasAllRequiredDocuments() && aspirant.status !== "approved") {
       aspirant.status = "approved";
       await this.aspirantRepo.save(aspirant);
+    }
+
+    // Fire the "new aspirant registered" notification only at the first
+    // incomplete→complete transition. Re-uploads of other documents
+    // (when already complete) skip this. Best-effort: never block upload.
+    if (!wasComplete && aspirant.hasAllRequiredDocuments()) {
+      await this.aspirantsService
+        .dispatchNewAspirantNotification(aspirant)
+        .catch(() => undefined);
     }
 
     return aspirant;

@@ -1,4 +1,5 @@
 import {
+  IsBoolean,
   IsInt,
   IsNotEmpty,
   IsString,
@@ -249,4 +250,15 @@ export class CreateAspirantDto {
   @IsString()
   @IsOptional()
   primaryRule?: string;
+
+  @ApiPropertyOptional({
+    description:
+      "Electronic agreement to the Standard Operating Procedure. Replaces the legacy SOP file upload. Pass true once the aspirant has agreed; defaults to false.",
+    example: true,
+    default: false,
+  })
+  @Type(() => Boolean)
+  @IsBoolean()
+  @IsOptional()
+  sopAgreed?: boolean;
 }

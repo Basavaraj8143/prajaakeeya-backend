@@ -106,6 +106,15 @@ export class Aspirant extends BaseEntity {
   @Column({ type: "varchar", default: "pending" })
   sopStatus!: "pending" | "verified" | "rejected";
 
+  // SOP is no longer a file upload — aspirants agree to it electronically.
+  // `sopAgreed` is the authoritative flag for the SOP requirement;
+  // `sopUrl` is retained for legacy records but no longer required.
+  @Column({ name: "sop_agreed", type: "boolean", default: false })
+  sopAgreed!: boolean;
+
+  @Column({ name: "sop_agreed_at", type: "timestamp", nullable: true })
+  sopAgreedAt?: Date | null;
+
   @Column({ type: "text", nullable: true })
   sopKannadaUrl?: string;
 
@@ -196,9 +205,10 @@ export class Aspirant extends BaseEntity {
   @OneToMany(() => AspirantMeeting, (meeting) => meeting.aspirant)
   meetings?: AspirantMeeting[];
 
-  // Helper methods for document validation (excluding SOP)
+  // Aspirant has met all submission requirements when they've (a) agreed
+  // to the SOP and (b) uploaded a selfie. SOP is no longer a file upload.
   hasAllRequiredDocuments(): boolean {
-    return !!(this.sopUrl && this.selfieUrl);
+    return !!(this.sopAgreed && this.selfieUrl);
   }
 
   getDocumentStatus(): "pending" | "completed" {

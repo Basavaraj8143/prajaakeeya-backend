@@ -307,6 +307,14 @@ export class AspirantsService {
       constituencyId: dto.constituencyId,
       wardId,
       userId: undefined as number | undefined,
+      sopAgreed: dto.sopAgreed === true,
+      sopAgreedAt: (dto.sopAgreed === true ? new Date() : null) as Date | null,
+      // SOP file path is deprecated — mark the legacy status as verified
+      // when agreement is given so admin views don't show "pending".
+      sopStatus: (dto.sopAgreed === true ? "verified" : "pending") as
+        | "pending"
+        | "verified"
+        | "rejected",
     };
 
     // Validate phone uniqueness before any writes
@@ -347,7 +355,8 @@ export class AspirantsService {
         const updated = await this.repo.findOne({ where: { id: existing.id } });
         if (updated) {
           await this.syncUserSavedConstituency(updated);
-          await this.dispatchNewAspirantNotification(updated);
+          // No new-aspirant notification yet — that fires when documents
+          // complete (sop + selfie uploaded), in MediaService.
         }
         return { ...updated, documentStatus: updated!.getDocumentStatus() };
       }
@@ -375,7 +384,9 @@ export class AspirantsService {
     }
 
     await this.syncUserSavedConstituency(aspirant);
-    await this.dispatchNewAspirantNotification(aspirant);
+    // No new-aspirant notification at registration — it fires when the
+    // aspirant first completes their required documents
+    // (hasAllRequiredDocuments → true), dispatched from MediaService.
 
     // Include documentStatus in response
     return {
@@ -384,13 +395,18 @@ export class AspirantsService {
     };
   }
 
-  private async dispatchNewAspirantNotification(aspirant: Aspirant) {
+  /**
+   * Public entry point — call this from MediaService once an aspirant has
+   * uploaded the required documents (sop + selfie). Best-effort: failures
+   * here must never block the upload flow.
+   */
+  async dispatchNewAspirantNotification(aspirant: Aspirant) {
     try {
       const ctx = await this.resolveConstituencyContext(aspirant);
       if (!ctx) return;
       await this.notificationsService.notifyNewAspirant(aspirant, ctx);
     } catch {
-      // Best-effort: notification failures must not break aspirant flows.
+      /* best-effort */
     }
   }
 
@@ -729,7 +745,7 @@ export class AspirantsService {
       .where("aspirant.electionId = :electionId", { electionId })
       .andWhere("aspirant.constituencyId = :constituencyId", { constituencyId })
       .andWhere("aspirant.isActive = :isActive", { isActive: true })
-      .andWhere("aspirant.sopUrl IS NOT NULL")
+      .andWhere("aspirant.sopAgreed = :sopAgreed", { sopAgreed: true })
       .andWhere("aspirant.selfieUrl IS NOT NULL")
       .orderBy("aspirant.createdAt", "DESC")
       .getMany();
@@ -1116,6 +1132,8 @@ export class AspirantsService {
     await this.repo.update(aspirant.id, {
       isActive: false,
       sopUrl: null as any,
+      sopAgreed: false,
+      sopAgreedAt: null,
       selfieUrl: null as any,
       phone: null as any,
     });
@@ -1225,7 +1243,7 @@ export class AspirantsService {
       .createQueryBuilder("aspirant")
       .leftJoinAndSelect("aspirant.user", "user")
       .where("aspirant.isActive = :isActive", { isActive: true })
-      .andWhere("aspirant.sopUrl IS NOT NULL")
+      .andWhere("aspirant.sopAgreed = :sopAgreed", { sopAgreed: true })
       .andWhere("aspirant.selfieUrl IS NOT NULL");
 
     if (search) {
