@@ -117,7 +117,15 @@ export class IssuesService {
       userId,
     );
 
-    return { issues, categories };
+    // Total = sum of every category's hand-raise count for this
+    // election + constituency. Each hand_raise row belongs to exactly one
+    // category, so summing the per-category counts is exact (no double-count).
+    const totalHandRaises = categories.reduce(
+      (sum, c) => sum + (c.count ?? 0),
+      0,
+    );
+
+    return { issues, categories, totalHandRaises };
   }
 
   async getCategoryCounts(
