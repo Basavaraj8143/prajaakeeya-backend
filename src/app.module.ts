@@ -5,6 +5,7 @@ import { TypeOrmModule } from "@nestjs/typeorm";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { ThrottlerStorageRedisService } from "@nest-lab/throttler-storage-redis";
 import { CacheModule } from "@nestjs/cache-manager";
+import { ScheduleModule } from "@nestjs/schedule";
 import { createKeyv } from "@keyv/redis";
 import Redis from "ioredis";
 
@@ -66,6 +67,7 @@ import { GramaPanchayat } from "./grama-panchayat/grama-panchayat.entity";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { Notification } from "./notifications/notification.entity";
 import { StatsModule } from "./stats/stats.module";
+import { RemindersModule } from "./reminders/reminders.module";
 
 // Build a Redis connection URL from REDIS_HOST + REDIS_PORT. Returns undefined
 // when REDIS_HOST is not set, so callers fall back to in-memory storage.
@@ -79,6 +81,9 @@ function resolveRedisUrl(): string | undefined {
 @Module({
   imports: [
     ConfigModule.forRoot({ isGlobal: true, validate }),
+
+    // Enables @Cron schedulers (meeting/visit reminders).
+    ScheduleModule.forRoot(),
 
     // Global rate limiting: configurable via env vars THROTTLE_TTL and THROTTLE_LIMIT.
     // Default: 200 requests per 60 seconds (bot protection).
@@ -215,6 +220,7 @@ function resolveRedisUrl(): string | undefined {
     GramaPanchayatModule,
     NotificationsModule,
     StatsModule,
+    RemindersModule,
     MediaModule,
   ],
   controllers: [HealthController],

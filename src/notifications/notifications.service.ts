@@ -257,6 +257,116 @@ export class NotificationsService {
     }
   }
 
+  // ── Reminder notifications (fired by the scheduler). Like the original
+  // "scheduled" notification, these fan out to EVERY voter in the aspirant's
+  // constituency (excluding the aspirant). They use distinct notification
+  // types so the FE can render them as reminders.
+
+  /** "Meeting starts in 15 minutes" — to the whole constituency. */
+  async notifyMeetingReminder(
+    aspirant: Aspirant,
+    meeting: AspirantMeeting,
+    context: ConstituencyContext,
+  ) {
+    return this.fanOutReminder(aspirant, context, {
+      type: "meeting_reminder",
+      title: "Meeting starting soon",
+      body: `${aspirant.name}'s meeting "${meeting.title || "a meeting"}" starts in 15 minutes.`,
+      meetingId: meeting.id ?? null,
+      metadata: { startTime: meeting.startTime ?? null, lead: "15m" },
+    });
+  }
+
+  /** "Meeting is starting now" — to the whole constituency. */
+  async notifyMeetingStart(
+    aspirant: Aspirant,
+    meeting: AspirantMeeting,
+    context: ConstituencyContext,
+  ) {
+    return this.fanOutReminder(aspirant, context, {
+      type: "meeting_started",
+      title: "Meeting starting now",
+      body: `${aspirant.name}'s meeting "${meeting.title || "a meeting"}" is starting now.`,
+      meetingId: meeting.id ?? null,
+      metadata: { startTime: meeting.startTime ?? null, lead: "0m" },
+    });
+  }
+
+  /** "Visit starts in 15 minutes" — to the whole constituency. */
+  async notifyVisitReminder(
+    aspirant: Aspirant,
+    visit: AspirantVisit,
+    context: ConstituencyContext,
+  ) {
+    const locationSuffix = visit.location ? ` at ${visit.location}` : "";
+    return this.fanOutReminder(aspirant, context, {
+      type: "visit_reminder",
+      title: "Visit starting soon",
+      body: `${aspirant.name}'s visit "${visit.title || "a ward visit"}"${locationSuffix} starts in 15 minutes.`,
+      visitId: visit.id ?? null,
+      metadata: {
+        startTime: visit.startTime ?? null,
+        location: visit.location ?? null,
+        lead: "15m",
+      },
+    });
+  }
+
+  /** "Visit is starting now" — to the whole constituency, at start time. */
+  async notifyVisitStart(
+    aspirant: Aspirant,
+    visit: AspirantVisit,
+    context: ConstituencyContext,
+  ) {
+    const locationSuffix = visit.location ? ` at ${visit.location}` : "";
+    return this.fanOutReminder(aspirant, context, {
+      type: "visit_started",
+      title: "Visit starting now",
+      body: `${aspirant.name}'s visit "${visit.title || "a ward visit"}"${locationSuffix} is starting now.`,
+      visitId: visit.id ?? null,
+      metadata: {
+        startTime: visit.startTime ?? null,
+        location: visit.location ?? null,
+        lead: "0m",
+      },
+    });
+  }
+
+  /**
+   * Shared fan-out for reminder notifications: resolves all constituency
+   * recipients (minus the aspirant) and bulk-inserts the rows. Best-effort —
+   * failures are logged, never thrown.
+   */
+  private async fanOutReminder(
+    aspirant: Aspirant,
+    context: ConstituencyContext,
+    template: Omit<Partial<Notification>, "userId">,
+  ) {
+    try {
+      if (!aspirant.electionId || !aspirant.constituencyId) {
+        return { created: 0 };
+      }
+      const recipients = await this.findRecipientUserIds(
+        context.electionType,
+        aspirant.constituencyId,
+        aspirant.userId,
+      );
+      return this.fanOut(recipients, {
+        aspirantId: aspirant.id,
+        aspirantName: aspirant.name,
+        electionId: aspirant.electionId,
+        constituencyId: aspirant.constituencyId,
+        constituencyName: context.constituencyName ?? null,
+        ...template,
+      });
+    } catch (err) {
+      this.logger.error(
+        `reminder fan-out (${template.type}) failed for aspirant ${aspirant.id}: ${(err as Error).message}`,
+      );
+      return { created: 0 };
+    }
+  }
+
   /**
    * Notify every prior participant in an aspirant's chat room (plus the
    * aspirant themselves) about a new message. Recipients are the union
