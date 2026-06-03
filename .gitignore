@@ -5,3 +5,7 @@ uploads
 .env.*
 .DS_Store
 firebase-test.html
+# Firebase service-account secrets (server-only — never commit)
+firebase-service-account*.json
+*serviceAccount*.json
+*-firebase-adminsdk-*.json

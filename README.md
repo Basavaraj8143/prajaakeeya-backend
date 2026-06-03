@@ -165,6 +165,14 @@ variables the app reads. **Never commit real secrets** — `.env` is gitignored.
 | `AWS_S3_BUCKET_NAME` | Bucket for uploaded media. |
 | `AWS_CLOUDFRONT_DOMAIN` | CDN domain used to build public media URLs (optional). |
 
+### Push notifications (Firebase Cloud Messaging)
+| Variable | Description |
+|---|---|
+| `FIREBASE_SERVICE_ACCOUNT` | Firebase service-account **JSON** (minified, single line). Enables web push. |
+| `FIREBASE_SERVICE_ACCOUNT_PATH` | Alternative: **path to** the service-account JSON file on disk (easier on a server). Use this *or* the inline var. |
+
+> If neither is set, push is disabled — in-app notifications and token registration still work.
+
 ### Redis, caching & misc
 | Variable | Description |
 |---|---|

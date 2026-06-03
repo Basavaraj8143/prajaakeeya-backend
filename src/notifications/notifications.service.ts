@@ -6,6 +6,7 @@ import { Aspirant } from "../aspirants/aspirant.entity";
 import { AspirantMeeting } from "../aspirants/aspirant-meeting.entity";
 import { AspirantVisit } from "../aspirants/aspirant-visit.entity";
 import { ElectionType } from "../elections/election.entity";
+import { FirebaseService } from "./firebase.service";
 
 interface ConstituencyContext {
   electionType: ElectionType;
@@ -19,6 +20,7 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly repo: Repository<Notification>,
+    private readonly firebase: FirebaseService,
   ) {}
 
   async list(
@@ -136,7 +138,31 @@ export class NotificationsService {
       await this.repo.save(rows);
       created += rows.length;
     }
+
+    // Best-effort web push to the same recipients. Fire-and-forget: a no-op
+    // when Firebase isn't configured, and never blocks/raises in the caller.
+    void this.firebase.sendToUsers(userIds, {
+      title: template.title ?? "Prajaakeeya",
+      body: template.body ?? "",
+      data: this.buildPushData(template),
+    });
+
     return { created };
+  }
+
+  /** Map a notification template's scalar fields into an FCM data payload
+   *  (all values must be strings) so the client can route on notification tap. */
+  private buildPushData(
+    t: Omit<Partial<Notification>, "userId">,
+  ): Record<string, string> {
+    const d: Record<string, string> = {};
+    if (t.type != null) d.type = String(t.type);
+    if (t.aspirantId != null) d.aspirantId = String(t.aspirantId);
+    if (t.meetingId != null) d.meetingId = String(t.meetingId);
+    if (t.visitId != null) d.visitId = String(t.visitId);
+    if (t.electionId != null) d.electionId = String(t.electionId);
+    if (t.constituencyId != null) d.constituencyId = String(t.constituencyId);
+    return d;
   }
 
   /**

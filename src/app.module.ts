@@ -66,6 +66,7 @@ import { GramaPanchayatModule } from "./grama-panchayat/grama-panchayat.module";
 import { GramaPanchayat } from "./grama-panchayat/grama-panchayat.entity";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { Notification } from "./notifications/notification.entity";
+import { FcmToken } from "./notifications/fcm-token.entity";
 import { StatsModule } from "./stats/stats.module";
 import { RemindersModule } from "./reminders/reminders.module";
 
@@ -197,6 +198,7 @@ function resolveRedisUrl(): string | undefined {
         Election,
         GramaPanchayat,
         Notification,
+        FcmToken,
       ],
     }),
 

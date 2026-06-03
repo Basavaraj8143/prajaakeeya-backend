@@ -1,4 +1,5 @@
 import {
+  Body,
   Controller,
   Delete,
   Get,
@@ -18,13 +19,41 @@ import {
 import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
 import { NotificationsService } from "./notifications.service";
+import { FirebaseService } from "./firebase.service";
+import {
+  RegisterDeviceTokenDto,
+  RemoveDeviceTokenDto,
+} from "./dto/device-token.dto";
 
 @ApiTags("Notifications")
 @ApiBearerAuth()
 @UseGuards(JwtAuthGuard)
 @Controller("notifications")
 export class NotificationsController {
-  constructor(private readonly service: NotificationsService) {}
+  constructor(
+    private readonly service: NotificationsService,
+    private readonly firebase: FirebaseService,
+  ) {}
+
+  // Declared before the ":id" routes so "device-token" isn't captured as an id.
+  @Post("device-token")
+  @ApiOperation({ summary: "Register an FCM device token for web push" })
+  @ApiResponse({ status: 201, description: "Token registered" })
+  async registerDeviceToken(
+    @CurrentUser() user: any,
+    @Body() dto: RegisterDeviceTokenDto,
+  ) {
+    await this.firebase.registerToken(user.id, dto.token, dto.platform);
+    return { ok: true };
+  }
+
+  @Delete("device-token")
+  @ApiOperation({ summary: "Unregister an FCM device token (e.g. on logout)" })
+  @ApiResponse({ status: 200, description: "Token removed" })
+  async unregisterDeviceToken(@Body() dto: RemoveDeviceTokenDto) {
+    await this.firebase.removeToken(dto.token);
+    return { ok: true };
+  }
 
   @Get()
   @ApiOperation({
