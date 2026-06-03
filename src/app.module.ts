@@ -1,5 +1,6 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_FILTER } from "@nestjs/core";
+import { SentryModule, SentryGlobalFilter } from "@sentry/nestjs/setup";
 import { ConfigModule } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
@@ -81,6 +82,8 @@ function resolveRedisUrl(): string | undefined {
 
 @Module({
   imports: [
+    // Sentry instrumentation (no-op unless SENTRY_DSN is set).
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, validate }),
 
     // Enables @Cron schedulers (meeting/visit reminders).
@@ -229,6 +232,10 @@ function resolveRedisUrl(): string | undefined {
   providers: [
     // Enforce rate limiting globally across all endpoints
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Report unhandled exceptions to Sentry (no-op unless SENTRY_DSN is set).
+    // MulterExceptionFilter (@Catch(MulterError), bound in main.ts) still takes
+    // precedence for upload errors.
+    { provide: APP_FILTER, useClass: SentryGlobalFilter },
   ],
 })
 export class AppModule {}

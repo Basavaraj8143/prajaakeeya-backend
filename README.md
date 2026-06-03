@@ -173,6 +173,12 @@ variables the app reads. **Never commit real secrets** — `.env` is gitignored.
 
 > If neither is set, push is disabled — in-app notifications and token registration still work.
 
+### Error tracking (Sentry)
+| Variable | Description |
+|---|---|
+| `SENTRY_DSN` | Sentry project DSN. Enables error/exception reporting. **If unset, Sentry is disabled** (no-op). |
+| `SENTRY_TRACES_SAMPLE_RATE` | Fraction of requests sampled for performance tracing (default `0.1`; `0` = errors only). |
+
 ### Redis, caching & misc
 | Variable | Description |
 |---|---|
