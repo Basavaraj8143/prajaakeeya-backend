@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<style>
+  @page { size: A4; margin: 18mm 16mm 16mm 16mm; }
+  * { box-sizing: border-box; }
+  body {
+    font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif;
+    color: #1f2733; font-size: 10.5px; line-height: 1.5; margin: 0;
+    -webkit-print-color-adjust: exact; print-color-adjust: exact;
+  }
+  h1 { color: #1a4f8b; font-size: 26px; margin: 0 0 4px; letter-spacing: -0.3px; }
+  .subtitle { color: #54606e; font-size: 11px; margin: 0 0 2px; }
+  .meta { color: #8a94a3; font-size: 9.5px; margin: 0 0 16px; }
+  h2 { color: #1a4f8b; font-size: 15px; margin: 26px 0 8px; padding-bottom: 5px; border-bottom: 2px solid #e2e8f0; }
+  h3 { color: #1a4f8b; font-size: 12.5px; margin: 16px 0 2px; }
+  .lead { color: #54606e; font-size: 10px; margin: 0 0 8px; }
+  p { margin: 6px 0; }
+  strong { color: #1f2733; }
+  code { font-family: "SF Mono", Menlo, Consolas, monospace; background: #eef2f7; color: #2c3e50; padding: 1px 4px; border-radius: 3px; font-size: 9.5px; }
+
+  .stats { display: flex; gap: 10px; margin: 4px 0 12px; }
+  .card { flex: 1; border: 1px solid #d9e1ec; border-radius: 8px; padding: 12px 6px; text-align: center; background: #fbfcfe; }
+  .card .num { font-size: 24px; font-weight: 700; color: #1a4f8b; line-height: 1; }
+  .card.pass .num { color: #1e9e57; }
+  .card.fail .num { color: #c0392b; }
+  .card .lbl { font-size: 8px; letter-spacing: 0.7px; color: #7b8794; margin-top: 6px; text-transform: uppercase; }
+  .pill { display: inline-block; background: #1e9e57; color: #fff; font-size: 9.5px; font-weight: 700; letter-spacing: 0.6px; padding: 4px 12px; border-radius: 12px; }
+  .pill-wrap { text-align: center; margin: 0 0 6px; }
+
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 4px; }
+  th { background: #eaf1f9; color: #1a4f8b; text-align: left; font-size: 9px; letter-spacing: 0.5px; text-transform: uppercase; padding: 7px 9px; border: 1px solid #d9e1ec; }
+  td { padding: 7px 9px; border: 1px solid #e2e8f0; vertical-align: top; font-size: 9.7px; }
+  tr:nth-child(even) td { background: #fafbfd; }
+
+  ul { margin: 4px 0 4px; padding-left: 18px; }
+  li { margin: 3px 0; }
+
+  pre { background: #1f2733; color: #e6edf3; border-radius: 8px; padding: 12px 14px; font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 9.3px; line-height: 1.55; overflow: hidden; margin: 8px 0; }
+  pre .c { color: #7b8794; }
+  pre code { background: none; color: inherit; padding: 0; }
+  .codeline { background: #f0f4f8; border: 1px solid #dce4ee; border-radius: 6px; padding: 9px 12px; text-align: center; font-family: "SF Mono", Menlo, monospace; font-size: 10px; color: #2c3e50; margin: 8px 0; }
+  .note { background: #fff8e8; border: 1px solid #f0e0b8; border-radius: 6px; padding: 9px 12px; font-size: 9.7px; color: #6b5a2b; }
+  .avoid-break { page-break-inside: avoid; }
+  .footer { margin-top: 22px; text-align: center; color: #9aa4b2; font-size: 9px; }
+</style>
+</head>
+<body>
+
+  <h1>Prajaakeeya Backend — Automated Test Report</h1>
+  <p class="subtitle">API service-behavior, security &amp; module-wiring test coverage for the NestJS API · CI/CD integration</p>
+  <p class="meta">Generated 5 June 2026 · Repository: prajaakeeya-backend · Branch: staging</p>
+
+  <div class="stats">
+    <div class="card"><div class="num">29</div><div class="lbl">Test Suites</div></div>
+    <div class="card"><div class="num">120</div><div class="lbl">Total Tests</div></div>
+    <div class="card pass"><div class="num">120</div><div class="lbl">Passing</div></div>
+    <div class="card fail"><div class="num">0</div><div class="lbl">Failing</div></div>
+    <div class="card"><div class="num">~16s</div><div class="lbl">Run Time</div></div>
+  </div>
+  <div class="pill-wrap"><span class="pill">ALL TESTS PASSING</span></div>
+
+  <h2>1. Overview</h2>
+  <p>The backend is covered by a <strong>Jest</strong> unit-test suite. Every test is a <strong>pure unit test</strong>: it runs in-process against mocked dependencies, with <strong>no database, no Redis, and no running server</strong>. This makes the suite fast (~16 seconds), deterministic, and safe to run in any environment — local machines and the CI runner alike — without provisioning infrastructure.</p>
+  <p>The suite delivers three kinds of coverage: <strong>API service-behavior testing</strong> — validating the business logic that powers the API endpoints (voting, reporting, aspirant registration, meetings, visits, ratings, issue hand-raises); <strong>security &amp; data-privacy testing</strong> — ensuring an aspirant's private contact details are never returned by the API unless the matching permission is enabled; and <strong>module wiring checks</strong> across all 22 modules.</p>
+  <p>Tests live <strong>next to the code they cover</strong> (<code>*.spec.ts</code> beside each source file) and are organised into two complementary layers.</p>
+
+  <h2>2. Test strategy — two layers</h2>
+  <table class="avoid-break">
+    <tr><th style="width:22%">Layer</th><th style="width:16%">Files / Tests</th><th>What it verifies</th></tr>
+    <tr>
+      <td><strong>Module wiring</strong><br><code>*.module.spec.ts</code></td>
+      <td>22 files<br>58 tests</td>
+      <td>Each NestJS module's dependency-injection wiring via its decorator metadata — that it <strong>registers its providers</strong>, <strong>declares its controllers</strong>, and <strong>exports</strong> what other modules import. Catches broken/missing wiring before the app is ever booted.</td>
+    </tr>
+    <tr>
+      <td><strong>API service behavior &amp; security</strong><br><code>*.service.spec.ts</code></td>
+      <td>7 files<br>62 tests</td>
+      <td>The <strong>business rules and security checks</strong> behind the API endpoints, run against mocked repositories — asserting return values, thrown exceptions, access-control / data-privacy rules, and the exact fields written to the data layer.</td>
+    </tr>
+  </table>
+
+  <h2>3. Module wiring coverage (22 modules)</h2>
+  <p class="lead">Each module spec asserts its providers, controllers, and exports are correctly declared.</p>
+  <table class="avoid-break">
+    <tr><th>Module</th><th style="width:14%">Tests</th><th>Module</th><th style="width:14%">Tests</th></tr>
+    <tr><td>admin</td><td>2</td><td>issues</td><td>3</td></tr>
+    <tr><td>aspirants</td><td>3</td><td>media</td><td>3</td></tr>
+    <tr><td>aspirant-chat</td><td>3</td><td>notifications</td><td>3</td></tr>
+    <tr><td>aspirant-discussion</td><td>3</td><td>pdf-upload</td><td>1</td></tr>
+    <tr><td>aspirant-ward-meetings</td><td>2</td><td>reminders</td><td>1</td></tr>
+    <tr><td>auth</td><td>3</td><td>stats</td><td>2</td></tr>
+    <tr><td>elections</td><td>3</td><td>users</td><td>3</td></tr>
+    <tr><td>extraction</td><td>3</td><td>verification</td><td>2</td></tr>
+    <tr><td>forum</td><td>3</td><td>voter-roll</td><td>3</td></tr>
+    <tr><td>geography</td><td>3</td><td>votes</td><td>3</td></tr>
+    <tr><td>grama-panchayat</td><td>3</td><td>wards</td><td>3</td></tr>
+  </table>
+
+  <h2>4. API service-behavior coverage (7 services, 62 tests)</h2>
+
+  <h3>AspirantsService — 34 tests</h3>
+  <p class="lead">Contact privacy, profile lifecycle, meetings, visits, and ratings.</p>
+  <ul>
+    <li><strong>Contact privacy:</strong> hides <code>phone</code> from anonymous viewers and other users when <code>allowPhone=false</code>; shows it to the <strong>owner</strong> regardless; hides <code>whatsappNumber</code> from non-owners when <code>allowWhatsapp=false</code>; shows both to everyone when both flags are true.</li>
+    <li><strong>register():</strong> rejects unauthenticated callers; rejects a phone already used by another user; rejects a whatsapp number already used by another aspirant; rejects a duplicate active profile; creates when all checks pass.</li>
+    <li><strong>updatePermissions():</strong> rejects when the aspirant is not owned by the caller; updates only the provided flags and returns them.</li>
+    <li><strong>withdrawAspirant():</strong> rejects when the user has no profile; blocks withdrawal while voting is open for the same election; otherwise withdraws and reverts the role to voter.</li>
+    <li><strong>Meetings — createBooking():</strong> 404 when the aspirant is missing; otherwise saves a <code>pending</code> booking carrying the voter's message and preferred time. <strong>respondToMeeting():</strong> 404 when the meeting is missing; records the RSVP and returns refreshed attending / not-attending counts.</li>
+    <li><strong>Visits — createVisit():</strong> 404 when the aspirant is missing; persists the visit (the constituency notification is best-effort and never blocks the save). <strong>respondToVisit():</strong> creates a new RSVP or flips the existing one in place without duplicating.</li>
+    <li><strong>Ratings — rateMeeting() / rateVisit():</strong> 404 when the activity is missing; create a 1–5 rating tied to the activity's aspirant, and are <strong>re-ratable</strong> (a repeat updates the value in place). <strong>rateContact():</strong> <strong>eligibility-gated</strong> (the voter must first have pressed the aspirant's phone / WhatsApp button) and <strong>one-time</strong> (a second attempt is rejected).</li>
+  </ul>
+
+  <h3>VotesService — 6 tests</h3>
+  <p class="lead"><code>castVote()</code> — the core voting rules.</p>
+  <ul>
+    <li>Rejects when no voting window is active.</li>
+    <li>Rejects a second vote in the same window (one vote per user per window).</li>
+    <li>Rejects when the aspirant does not exist.</li>
+    <li>Rejects a vote for a withdrawn aspirant.</li>
+    <li>Requires the user to have interacted before voting.</li>
+    <li>Persists the vote with the correct fields on success.</li>
+  </ul>
+
+  <h3>UsersService — 5 tests</h3>
+  <p class="lead">Reporting and voter listing.</p>
+  <ul>
+    <li><strong>createReport():</strong> throws when the reported user does not exist; rejects a disallowed attachment type; creates a <code>pending</code> report tagged with the reporter id; uploads a valid attachment and stores its URL.</li>
+    <li><strong>findAllVoters():</strong> applies correct <code>skip</code> / <code>take</code> pagination and returns shaped, paginated data.</li>
+  </ul>
+
+  <h3>IssuesService — 4 tests</h3>
+  <p class="lead">Ward issues and hand-raise toggle.</p>
+  <ul>
+    <li><strong>createHandRaise():</strong> requires a non-empty category; removes an existing hand-raise (toggle off); creates one when none exists (toggle on).</li>
+    <li><strong>createIssue():</strong> persists an issue with scoping + creator fields.</li>
+  </ul>
+
+  <h3>S3Service — 6 tests</h3>
+  <p class="lead">Object-key extraction for safe deletes.</p>
+  <ul>
+    <li><strong>extractKeyFromUrl():</strong> derives the correct object key from plain S3, virtual-hosted-style, and CloudFront / CDN URLs, and returns empty for malformed input — so a delete only ever targets the intended object.</li>
+  </ul>
+
+  <h3>FirebaseService — 5 tests</h3>
+  <p class="lead">FCM web-push send behavior.</p>
+  <ul>
+    <li>Persists device tokens, shapes the push payload correctly, and degrades gracefully when no token is registered or Firebase is not configured.</li>
+  </ul>
+
+  <h3>ChatEventsService — 2 tests</h3>
+  <p class="lead">Server-Sent Events stream for aspirant chat.</p>
+  <ul>
+    <li>Subscribers receive published messages on the correct aspirant channel and are isolated from other channels.</li>
+  </ul>
+
+  <h2>5. Security &amp; data-privacy testing</h2>
+  <p>A dedicated group of tests treats an aspirant's contact information as <strong>protected personal data</strong> and verifies the API exposes it <strong>only with explicit consent</strong>. An aspirant controls visibility through the <code>allowPhone</code> and <code>allowWhatsapp</code> permission flags; when a flag is not enabled, the corresponding value must never be returned. These tests guard against accidentally leaking phone / WhatsApp numbers to voters or other users, and confirm access control across distinct viewer identities.</p>
+  <table class="avoid-break">
+    <tr><th style="width:48%">Scenario (permission flag = off)</th><th>Expected outcome — enforced by test</th></tr>
+    <tr><td>Anonymous viewer requests an aspirant</td><td><code>phone</code> is <strong>omitted entirely</strong> — the value never leaves the server (not blanked)</td></tr>
+    <tr><td>A different logged-in user requests the aspirant</td><td><code>phone</code> is <strong>omitted</strong></td></tr>
+    <tr><td>The <strong>owner</strong> requests their own profile</td><td><code>phone</code> is <strong>included</strong> — the owner's profile screen relies on it</td></tr>
+    <tr><td><code>allowWhatsapp</code> off, non-owner viewer</td><td><code>whatsappNumber</code> is <strong>omitted</strong>; the owner still sees it</td></tr>
+    <tr><td>Both permission flags ON</td><td>Both <code>phone</code> and <code>whatsappNumber</code> are returned to everyone</td></tr>
+  </table>
+  <p>The permission flags themselves remain in the response so the client knows which contact actions to offer — only the underlying values are withheld. This is verified as part of the 34 AspirantsService tests in section 4.</p>
+
+  <h2>6. CI/CD integration</h2>
+  <p>The suite runs automatically in <strong>GitHub Actions</strong> on every <strong>pull request</strong> and every <strong>push to <code>main</code> and <code>staging</code></strong> (<code>.github/workflows/ci.yml</code>). The <code>validate</code> job runs four steps in order:</p>
+  <div class="codeline">lint &nbsp;→&nbsp; typecheck &nbsp;→&nbsp; npm test --runInBand &nbsp;→&nbsp; build</div>
+  <p>Because the tests require no external services, they run on a plain <code>ubuntu-latest</code> runner with only <code>npm ci</code> — no Postgres, Redis, or environment configuration. Any failing test fails the check and blocks the merge (where branch protection requires CI). The deploy workflow (<code>deploy.yml</code>) builds and ships to EC2 only after validation.</p>
+  <table class="avoid-break">
+    <tr><th style="width:26%">Aspect</th><th>Detail</th></tr>
+    <tr><td>Triggers</td><td>Pull requests &amp; pushes to <code>main</code> and <code>staging</code></td></tr>
+    <tr><td>Runner</td><td><code>ubuntu-latest</code>, Node.js 20, npm cache</td></tr>
+    <tr><td>Test command</td><td><code>npm test -- --runInBand</code></td></tr>
+    <tr><td>External services</td><td>None — fully mocked, no DB/Redis</td></tr>
+    <tr><td>Gate</td><td>A red test fails the <code>validate</code> job and blocks merge / deploy</td></tr>
+  </table>
+
+  <h2>7. Running the tests locally</h2>
+  <pre><code><span class="c"># install once, then run the full suite</span>
+npm install
+npm test
+
+<span class="c"># watch mode (re-run on change) and coverage</span>
+npm run test:watch
+npm run test:cov
+
+<span class="c"># target a file, folder, or test name</span>
+npx jest src/aspirants
+npx jest aspirants.service.spec.ts
+npx jest -t "rateContact"</code></pre>
+  <div class="note"><strong>No setup required.</strong> The tests do not read <code>.env</code>, connect to a database, or start a server. A fresh clone with <code>npm install</code> can run the entire suite immediately.</div>
+
+  <div class="footer">Prajaakeeya Backend — Automated Test Report · 29 suites · 120 tests · generated 5 June 2026</div>
+
+</body>
+</html>

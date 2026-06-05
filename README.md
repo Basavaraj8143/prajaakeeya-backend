@@ -338,6 +338,7 @@ Cross-cutting concerns (auth guards, decorators, S3) live in `common/`.
 ## Testing
 
 Jest unit suite — **no database or server required** (mocked dependencies).
+**29 suites · 120 tests**, all passing.
 
 ```bash
 npm test            # run all tests
@@ -345,8 +346,23 @@ npm run test:watch  # watch mode
 npm run test:cov    # coverage
 ```
 
-Two layers: **module-wiring** tests (`*.module.spec.ts`) and **service-behavior /
-security** tests (`*.service.spec.ts`). The suite runs in CI on every PR.
+Two layers: **module-wiring** tests (`*.module.spec.ts` — 22 files / 58 tests)
+and **service-behavior / security** tests (`*.service.spec.ts` — 7 files /
+62 tests). The suite runs in CI on every PR.
+
+Service-behavior coverage in brief:
+
+- **AspirantsService** (34) — contact privacy (phone/WhatsApp shown only when
+  allowed, except the owner); `register` / `updatePermissions` / `withdraw`
+  rules; **meeting requests** (`createBooking`) and **visits** (`createVisit`,
+  `respondToVisit`, `respondToMeeting` attendance counts); and **ratings** for
+  meetings, visits, and **contact** (`rateMeeting` / `rateVisit` are re-ratable;
+  `rateContact` is eligibility-gated and one-time).
+- **VotesService** (6), **UsersService** (5), **IssuesService** (4) — core
+  business rules (voting window, reports/pagination, hand-raise/issues).
+- **S3Service** (6), **FirebaseService** (5), **ChatEventsService** (2) —
+  infra/integration behavior (key extraction, FCM send, SSE event stream).
+
 See **[TESTING.md](./TESTING.md)** for the full breakdown.
 
 ---

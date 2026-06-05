@@ -29,6 +29,15 @@ function buildService(deps: Record<string, any> = {}): any {
   );
 }
 
+// Minimal chainable QueryBuilder stub whose terminal getRawMany() resolves to
+// the given rows — used by methods that aggregate response counts in SQL.
+function qbReturning(rows: any[]): any {
+  const qb: any = {};
+  for (const m of ["select", "addSelect", "where", "groupBy"]) qb[m] = () => qb;
+  qb.getRawMany = async () => rows;
+  return qb;
+}
+
 describe("AspirantsService — contact privacy (findOne)", () => {
   const OWNER_USER_ID = 56;
   const ASPIRANT_ID = 54;
@@ -288,5 +297,248 @@ describe("AspirantsService — rateContact()", () => {
 
     await expect(service.rateContact(54, 57, 5)).rejects.toThrow("already rated");
     expect(create).not.toHaveBeenCalled();
+  });
+});
+
+describe("AspirantsService — createBooking() (meeting request)", () => {
+  it("rejects when the aspirant does not exist", async () => {
+    const service = buildService({ repo: { findOne: jest.fn(async () => null) } });
+    await expect(service.createBooking(54, 57, "hi", 123)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it("creates a pending booking with the voter's details and persists it", async () => {
+    const create = jest.fn((x: any) => x);
+    const save = jest.fn(async (x: any) => ({ id: 1, ...x }));
+    const service = buildService({
+      repo: { findOne: jest.fn(async () => ({ id: 54 })) },
+      bookingRepo: { create, save },
+    });
+
+    const result = await service.createBooking(54, 57, "Please meet", 1780000000000);
+
+    expect(create).toHaveBeenCalledWith({
+      aspirantId: 54,
+      voterId: 57,
+      message: "Please meet",
+      preferredAt: 1780000000000,
+      status: "pending",
+    });
+    expect(save).toHaveBeenCalled();
+    expect(result).toMatchObject({ id: 1, status: "pending" });
+  });
+});
+
+describe("AspirantsService — createVisit()", () => {
+  it("rejects when the aspirant does not exist", async () => {
+    const service = buildService({ repo: { findOne: jest.fn(async () => null) } });
+    await expect(service.createVisit(54, 1780000000000)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it("creates and saves the visit (notification is best-effort)", async () => {
+    const create = jest.fn((x: any) => x);
+    const save = jest.fn(async (x: any) => ({ id: 9, ...x }));
+    const service = buildService({
+      repo: { findOne: jest.fn(async () => ({ id: 54 })) },
+      visitRepo: { create, save },
+      // The post-save notify path throws on the noop deps but is swallowed —
+      // the saved visit is still returned.
+    });
+
+    const result = await service.createVisit(
+      54,
+      1780000000000,
+      1780003600000,
+      "Door-to-door",
+      "Meet voters",
+      "Ward 5",
+      "https://maps.example/x",
+    );
+
+    expect(create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        aspirantId: 54,
+        startTime: 1780000000000,
+        title: "Door-to-door",
+        location: "Ward 5",
+      }),
+    );
+    expect(save).toHaveBeenCalled();
+    expect(result).toMatchObject({ id: 9, title: "Door-to-door" });
+  });
+});
+
+describe("AspirantsService — respondToVisit()", () => {
+  it("rejects when the visit does not exist", async () => {
+    const service = buildService({
+      visitRepo: { findOne: jest.fn(async () => null) },
+    });
+    await expect(service.respondToVisit(7, 57, true)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it("creates a new response when the voter has not responded", async () => {
+    const create = jest.fn((x: any) => x);
+    const save = jest.fn(async (x: any) => x);
+    const service = buildService({
+      visitRepo: { findOne: jest.fn(async () => ({ id: 7 })) },
+      visitResponseRepo: { findOne: jest.fn(async () => null), create, save },
+    });
+
+    await service.respondToVisit(7, 57, true);
+
+    expect(create).toHaveBeenCalledWith({ visitId: 7, voterId: 57, attending: true });
+    expect(save).toHaveBeenCalled();
+  });
+
+  it("updates the existing response instead of duplicating", async () => {
+    const existing: any = { visitId: 7, voterId: 57, attending: true };
+    const create = jest.fn();
+    const save = jest.fn(async (x: any) => x);
+    const service = buildService({
+      visitRepo: { findOne: jest.fn(async () => ({ id: 7 })) },
+      visitResponseRepo: { findOne: jest.fn(async () => existing), create, save },
+    });
+
+    await service.respondToVisit(7, 57, false);
+
+    expect(existing.attending).toBe(false);
+    expect(create).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(existing);
+  });
+});
+
+describe("AspirantsService — respondToMeeting()", () => {
+  it("rejects when the meeting does not exist", async () => {
+    const service = buildService({
+      meetingRepo: { findOne: jest.fn(async () => null) },
+    });
+    await expect(service.respondToMeeting(10, 57, true)).rejects.toThrow(
+      NotFoundException,
+    );
+  });
+
+  it("records the response and returns refreshed attendance counts", async () => {
+    const create = jest.fn((x: any) => x);
+    const save = jest.fn(async (x: any) => x);
+    const service = buildService({
+      meetingRepo: { findOne: jest.fn(async () => ({ id: 10 })) },
+      meetingResponseRepo: {
+        findOne: jest.fn(async () => null),
+        create,
+        save,
+        createQueryBuilder: () =>
+          qbReturning([{ meetingId: 10, attending: 3, notAttending: 1 }]),
+      },
+    });
+
+    const result = await service.respondToMeeting(10, 57, true);
+
+    expect(create).toHaveBeenCalledWith({
+      meetingId: 10,
+      voterId: 57,
+      attending: true,
+    });
+    expect(result).toEqual({
+      id: 10,
+      meetingId: 10,
+      attending: true,
+      attendingCount: 3,
+      notAttendingCount: 1,
+    });
+  });
+});
+
+describe("AspirantsService — rateMeeting()", () => {
+  it("rejects when the meeting does not exist", async () => {
+    const service = buildService({
+      meetingRepo: { findOne: jest.fn(async () => null) },
+    });
+    await expect(service.rateMeeting(10, 57, 4)).rejects.toThrow(NotFoundException);
+  });
+
+  it("creates a meeting rating tied to the meeting's aspirant", async () => {
+    const create = jest.fn((x: any) => x);
+    const save = jest.fn(async (x: any) => x);
+    const service = buildService({
+      meetingRepo: { findOne: jest.fn(async () => ({ id: 10, aspirantId: 54 })) },
+      activityRatingRepo: { findOne: jest.fn(async () => null), create, save },
+    });
+
+    await service.rateMeeting(10, 57, 4);
+
+    expect(create).toHaveBeenCalledWith({
+      type: "meeting",
+      activityId: 10,
+      aspirantId: 54,
+      voterId: 57,
+      rating: 4,
+    });
+    expect(save).toHaveBeenCalled();
+  });
+
+  it("updates an existing meeting rating (re-rating is allowed)", async () => {
+    const existing: any = { type: "meeting", activityId: 10, voterId: 57, rating: 2 };
+    const create = jest.fn();
+    const save = jest.fn(async (x: any) => x);
+    const service = buildService({
+      meetingRepo: { findOne: jest.fn(async () => ({ id: 10, aspirantId: 54 })) },
+      activityRatingRepo: { findOne: jest.fn(async () => existing), create, save },
+    });
+
+    await service.rateMeeting(10, 57, 5);
+
+    expect(existing.rating).toBe(5);
+    expect(create).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(existing);
+  });
+});
+
+describe("AspirantsService — rateVisit()", () => {
+  it("rejects when the visit does not exist", async () => {
+    const service = buildService({
+      visitRepo: { findOne: jest.fn(async () => null) },
+    });
+    await expect(service.rateVisit(7, 57, 4)).rejects.toThrow(NotFoundException);
+  });
+
+  it("creates a visit rating tied to the visit's aspirant", async () => {
+    const create = jest.fn((x: any) => x);
+    const save = jest.fn(async (x: any) => x);
+    const service = buildService({
+      visitRepo: { findOne: jest.fn(async () => ({ id: 7, aspirantId: 54 })) },
+      activityRatingRepo: { findOne: jest.fn(async () => null), create, save },
+    });
+
+    await service.rateVisit(7, 57, 4);
+
+    expect(create).toHaveBeenCalledWith({
+      type: "visit",
+      activityId: 7,
+      aspirantId: 54,
+      voterId: 57,
+      rating: 4,
+    });
+    expect(save).toHaveBeenCalled();
+  });
+
+  it("updates an existing visit rating (re-rating is allowed)", async () => {
+    const existing: any = { type: "visit", activityId: 7, voterId: 57, rating: 1 };
+    const create = jest.fn();
+    const save = jest.fn(async (x: any) => x);
+    const service = buildService({
+      visitRepo: { findOne: jest.fn(async () => ({ id: 7, aspirantId: 54 })) },
+      activityRatingRepo: { findOne: jest.fn(async () => existing), create, save },
+    });
+
+    await service.rateVisit(7, 57, 3);
+
+    expect(existing.rating).toBe(3);
+    expect(create).not.toHaveBeenCalled();
+    expect(save).toHaveBeenCalledWith(existing);
   });
 });

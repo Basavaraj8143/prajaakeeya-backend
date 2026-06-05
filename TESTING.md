@@ -6,7 +6,7 @@ dependencies and run entirely in-process, with **no database, no Redis, and no
 running server required**. This makes them fast, deterministic, and safe to run
 anywhere (locally or in CI).
 
-> **Status:** 26 test suites · 88 tests · all passing.
+> **Status:** 29 test suites · 120 tests · all passing.
 
 ---
 
@@ -50,7 +50,7 @@ Covered modules: `admin`, `aspirants`, `aspirant-chat`, `aspirant-discussion`,
 `pdf-upload`, `reminders`, `stats`, `users`, `verification`, `voter-roll`,
 `votes`, `wards`.
 
-### 2. Service behavior tests — `*.service.spec.ts` (4 files, 30 tests)
+### 2. Service behavior tests — `*.service.spec.ts` (7 files, 62 tests)
 
 These exercise the actual **business rules** of key services with mocked
 repositories and dependencies, asserting real outcomes (return values, thrown
@@ -58,10 +58,13 @@ exceptions, and the fields written to the data layer).
 
 | Service | What it locks in |
 |---|---|
-| **AspirantsService** (15) | Contact privacy: `phone` only shown when `allowPhone` is true, `whatsappNumber` only when `allowWhatsapp` is true — **except the owner**, who always sees their own. Plus `register` (auth, phone/whatsapp uniqueness, no duplicate active profile), `updatePermissions` (owner-only), `withdrawAspirant` (blocked while voting is open, reverts role to voter). |
+| **AspirantsService** (34) | **Contact privacy** — `phone` only shown when `allowPhone` is true, `whatsappNumber` only when `allowWhatsapp` is true, **except the owner**, who always sees their own. **Profile lifecycle** — `register` (auth, phone/whatsapp uniqueness, no duplicate active profile), `updatePermissions` (owner-only), `withdrawAspirant` (blocked while voting is open, reverts role to voter). **Meetings** — `createBooking` (aspirant must exist; saved `pending` with the voter's message/preferred time), `respondToMeeting` (404 when missing; records attendance and returns refreshed attending/not-attending counts). **Visits** — `createVisit` (404 when missing; persists the visit, notification is best-effort), `respondToVisit` (creates a new response or flips the existing one without duplicating). **Ratings** — `rateMeeting` / `rateVisit` create a rating tied to the activity's aspirant and are **re-ratable** (update in place); `rateContact` is **eligibility-gated** (voter must have pressed the phone/WhatsApp button) and **one-time** (a second attempt is rejected). |
 | **VotesService** (6) | `castVote` rules: an active voting window is required, one vote per user per window, aspirant must exist and not be withdrawn, the user must have interacted first, and a successful vote is persisted with the correct fields. |
 | **UsersService** (5) | `createReport` (unknown target → 404, disallowed attachment type rejected, valid attachment uploaded, report saved as `pending` with the reporter id) and `findAllVoters` pagination (`skip`/`take`) + response shaping. |
 | **IssuesService** (4) | `createHandRaise` toggle (category required; raising an already-raised category removes it, otherwise adds it) and `createIssue` persistence with scoping + creator fields. |
+| **S3Service** (6) | `extractKeyFromUrl` derives the object key from plain S3, virtual-hosted, and CloudFront/CDN URLs (and returns empty for junk) so deletes target the right object. |
+| **FirebaseService** (5) | FCM web-push send behavior — token persistence, payload shaping, and graceful handling when no token / not configured. |
+| **ChatEventsService** (2) | SSE event stream — subscribers receive published aspirant-chat messages on the correct channel. |
 
 ---
 
