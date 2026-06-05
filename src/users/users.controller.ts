@@ -200,7 +200,13 @@ export class UsersController {
   @Post("track/phone-call")
   @UseGuards(JwtAuthGuard)
   @ApiBearerAuth()
-  @ApiOperation({ summary: "Track phone call" })
+  @ApiOperation({
+    summary: "Track phone/WhatsApp ('contact') button press",
+    description:
+      "Reused for both the phone and WhatsApp buttons. Pass the click time as " +
+      "`timestamp` (epoch ms); it's stored as phoneCallAt and makes the voter " +
+      "eligible to rate this aspirant's contact.",
+  })
   @ApiResponse({
     status: 201,
     description: "Phone call interaction tracked successfully",
@@ -209,7 +215,11 @@ export class UsersController {
   @ApiResponse({ status: 401, description: "Unauthorized" })
   async trackPhoneCall(@Body() dto: TrackInteractionDto, @Req() req: any) {
     const userId = req.user?.id;
-    return this.usersService.trackPhoneCall(userId, dto.aspirantId);
+    return this.usersService.trackPhoneCall(
+      userId,
+      dto.aspirantId,
+      dto.timestamp ? new Date(dto.timestamp) : undefined,
+    );
   }
 
   @Get("track/message")

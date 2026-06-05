@@ -671,6 +671,7 @@ export class UsersService {
     userId: number,
     aspirantId: number,
     type: InteractionType,
+    at?: Date,
   ): Promise<{ user: User; message: string }> {
     const flagCol = {
       chat: "isChat",
@@ -700,12 +701,14 @@ export class UsersService {
     });
     if (existing) {
       (existing as any)[flagCol] = true;
+      if (type === "phoneCall") (existing as any).phoneCallAt = at ?? new Date();
       await this.userAspirantInteractionRepo.save(existing);
     } else {
       await this.userAspirantInteractionRepo.save({
         userId,
         aspirantId,
         [flagCol]: true,
+        ...(type === "phoneCall" ? { phoneCallAt: at ?? new Date() } : {}),
       } as any);
     }
 
@@ -746,8 +749,8 @@ export class UsersService {
     return this.trackInteraction(userId, aspirantId, "directMeet");
   }
 
-  trackPhoneCall(userId: number, aspirantId: number) {
-    return this.trackInteraction(userId, aspirantId, "phoneCall");
+  trackPhoneCall(userId: number, aspirantId: number, at?: Date) {
+    return this.trackInteraction(userId, aspirantId, "phoneCall", at);
   }
 
   async clearPhone(userId: number) {

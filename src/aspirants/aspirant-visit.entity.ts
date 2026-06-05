@@ -29,6 +29,15 @@ export class AspirantVisit extends BaseEntity {
   @Column({ nullable: true })
   googleMapsLink?: string;
 
+  // Reminder bookkeeping so the scheduler sends each notification exactly once.
+  // reminderBeforeSent → the "15 minutes before start" reminder.
+  // reminderStartSent  → the "starting now" notification (at start time).
+  @Column({ name: "reminder_before_sent", type: "boolean", default: false })
+  reminderBeforeSent!: boolean;
+
+  @Column({ name: "reminder_start_sent", type: "boolean", default: false })
+  reminderStartSent!: boolean;
+
   @OneToMany("VisitResponse", "visit")
   responses?: any[];
 }

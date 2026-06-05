@@ -86,11 +86,25 @@ export class S3Service {
   }
 
   /**
-   * Extract S3 key from full URL
+   * Extract the S3 object key from a stored URL.
+   *
+   * Handles BOTH S3 virtual-hosted URLs
+   * (`https://<bucket>.s3.<region>.amazonaws.com/<key>`) and CloudFront / CDN
+   * URLs (`https://<cdnDomain>/<key>`) — the key is simply the URL path. The
+   * old implementation split on ".amazonaws.com/" and returned "" for CDN
+   * URLs, which made DeleteObject fail with 403 AccessDenied (empty key).
    */
   private extractKeyFromUrl(url: string): string {
-    const urlParts = url.split(".amazonaws.com/");
-    return urlParts.length > 1 ? urlParts[1] : "";
+    if (!url) return "";
+    try {
+      const { pathname } = new URL(url);
+      return decodeURIComponent(pathname.replace(/^\/+/, ""));
+    } catch {
+      // Not an absolute URL — assume it's already a key, with a legacy
+      // ".amazonaws.com/" fallback just in case.
+      const parts = url.split(".amazonaws.com/");
+      return parts.length > 1 ? parts[1] : url.replace(/^\/+/, "");
+    }
   }
 
   /**

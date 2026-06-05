@@ -10,6 +10,7 @@ import { Aspirant } from "./aspirant.entity";
 import { CreateAspirantMessageDto } from "./dto/create-aspirant-message.dto";
 import { GetAspirantMessagesDto } from "./dto/get-aspirant-messages.dto";
 import { NotificationsService } from "../notifications/notifications.service";
+import { ChatEventsService } from "./chat-events.service";
 
 @Injectable()
 export class AspirantChatService {
@@ -19,6 +20,7 @@ export class AspirantChatService {
     @InjectRepository(Aspirant)
     private readonly aspirantRepo: Repository<Aspirant>,
     private readonly notificationsService: NotificationsService,
+    private readonly chatEvents: ChatEventsService,
   ) {}
 
   async createMessage(
@@ -32,6 +34,13 @@ export class AspirantChatService {
       aspirantId,
     });
     const saved = await this.repo.save(message);
+
+    // Push to live SSE subscribers in this room immediately.
+    this.chatEvents.publish({
+      aspirantId,
+      type: "message.created",
+      payload: saved,
+    });
 
     // Fan out a notification to every prior participant + the aspirant,
     // excluding the sender. Best-effort: chat must not fail if the
@@ -91,7 +100,13 @@ export class AspirantChatService {
     if (!message) throw new NotFoundException("Message not found");
     if (message.userId !== userId)
       throw new ForbiddenException("Can only delete your own messages");
+    const { aspirantId } = message;
     await this.repo.remove(message);
+    this.chatEvents.publish({
+      aspirantId,
+      type: "message.deleted",
+      payload: { id: messageId },
+    });
     return { message: "Message deleted" };
   }
 }

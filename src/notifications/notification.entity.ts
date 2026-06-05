@@ -8,7 +8,12 @@ export type NotificationType =
   | "aspirant_visit"
   | "aspirant_event"
   | "chat_message"
-  | "voting_window";
+  | "voting_window"
+  // Reminder notifications fired by the scheduler:
+  | "meeting_reminder" // 15 min before a meeting
+  | "meeting_started" // when a meeting starts
+  | "visit_reminder" // 15 min before a visit
+  | "visit_started"; // when a visit starts
 
 @Index("idx_notifications_user_created", ["userId", "createdAt"])
 @Index("idx_notifications_user_unread", ["userId", "isRead"])

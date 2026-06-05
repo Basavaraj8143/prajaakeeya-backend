@@ -6,6 +6,7 @@ import { Aspirant } from "../aspirants/aspirant.entity";
 import { AspirantMeeting } from "../aspirants/aspirant-meeting.entity";
 import { AspirantVisit } from "../aspirants/aspirant-visit.entity";
 import { ElectionType } from "../elections/election.entity";
+import { FirebaseService } from "./firebase.service";
 
 interface ConstituencyContext {
   electionType: ElectionType;
@@ -19,6 +20,7 @@ export class NotificationsService {
   constructor(
     @InjectRepository(Notification)
     private readonly repo: Repository<Notification>,
+    private readonly firebase: FirebaseService,
   ) {}
 
   async list(
@@ -136,7 +138,31 @@ export class NotificationsService {
       await this.repo.save(rows);
       created += rows.length;
     }
+
+    // Best-effort web push to the same recipients. Fire-and-forget: a no-op
+    // when Firebase isn't configured, and never blocks/raises in the caller.
+    void this.firebase.sendToUsers(userIds, {
+      title: template.title ?? "Prajaakeeya",
+      body: template.body ?? "",
+      data: this.buildPushData(template),
+    });
+
     return { created };
+  }
+
+  /** Map a notification template's scalar fields into an FCM data payload
+   *  (all values must be strings) so the client can route on notification tap. */
+  private buildPushData(
+    t: Omit<Partial<Notification>, "userId">,
+  ): Record<string, string> {
+    const d: Record<string, string> = {};
+    if (t.type != null) d.type = String(t.type);
+    if (t.aspirantId != null) d.aspirantId = String(t.aspirantId);
+    if (t.meetingId != null) d.meetingId = String(t.meetingId);
+    if (t.visitId != null) d.visitId = String(t.visitId);
+    if (t.electionId != null) d.electionId = String(t.electionId);
+    if (t.constituencyId != null) d.constituencyId = String(t.constituencyId);
+    return d;
   }
 
   /**
@@ -252,6 +278,116 @@ export class NotificationsService {
     } catch (err) {
       this.logger.error(
         `notifyAspirantVisit failed for aspirant ${aspirant.id}: ${(err as Error).message}`,
+      );
+      return { created: 0 };
+    }
+  }
+
+  // ── Reminder notifications (fired by the scheduler). Like the original
+  // "scheduled" notification, these fan out to EVERY voter in the aspirant's
+  // constituency (excluding the aspirant). They use distinct notification
+  // types so the FE can render them as reminders.
+
+  /** "Meeting starts in 15 minutes" — to the whole constituency. */
+  async notifyMeetingReminder(
+    aspirant: Aspirant,
+    meeting: AspirantMeeting,
+    context: ConstituencyContext,
+  ) {
+    return this.fanOutReminder(aspirant, context, {
+      type: "meeting_reminder",
+      title: "Meeting starting soon",
+      body: `${aspirant.name}'s meeting "${meeting.title || "a meeting"}" starts in 15 minutes.`,
+      meetingId: meeting.id ?? null,
+      metadata: { startTime: meeting.startTime ?? null, lead: "15m" },
+    });
+  }
+
+  /** "Meeting is starting now" — to the whole constituency. */
+  async notifyMeetingStart(
+    aspirant: Aspirant,
+    meeting: AspirantMeeting,
+    context: ConstituencyContext,
+  ) {
+    return this.fanOutReminder(aspirant, context, {
+      type: "meeting_started",
+      title: "Meeting starting now",
+      body: `${aspirant.name}'s meeting "${meeting.title || "a meeting"}" is starting now.`,
+      meetingId: meeting.id ?? null,
+      metadata: { startTime: meeting.startTime ?? null, lead: "0m" },
+    });
+  }
+
+  /** "Visit starts in 15 minutes" — to the whole constituency. */
+  async notifyVisitReminder(
+    aspirant: Aspirant,
+    visit: AspirantVisit,
+    context: ConstituencyContext,
+  ) {
+    const locationSuffix = visit.location ? ` at ${visit.location}` : "";
+    return this.fanOutReminder(aspirant, context, {
+      type: "visit_reminder",
+      title: "Visit starting soon",
+      body: `${aspirant.name}'s visit "${visit.title || "a ward visit"}"${locationSuffix} starts in 15 minutes.`,
+      visitId: visit.id ?? null,
+      metadata: {
+        startTime: visit.startTime ?? null,
+        location: visit.location ?? null,
+        lead: "15m",
+      },
+    });
+  }
+
+  /** "Visit is starting now" — to the whole constituency, at start time. */
+  async notifyVisitStart(
+    aspirant: Aspirant,
+    visit: AspirantVisit,
+    context: ConstituencyContext,
+  ) {
+    const locationSuffix = visit.location ? ` at ${visit.location}` : "";
+    return this.fanOutReminder(aspirant, context, {
+      type: "visit_started",
+      title: "Visit starting now",
+      body: `${aspirant.name}'s visit "${visit.title || "a ward visit"}"${locationSuffix} is starting now.`,
+      visitId: visit.id ?? null,
+      metadata: {
+        startTime: visit.startTime ?? null,
+        location: visit.location ?? null,
+        lead: "0m",
+      },
+    });
+  }
+
+  /**
+   * Shared fan-out for reminder notifications: resolves all constituency
+   * recipients (minus the aspirant) and bulk-inserts the rows. Best-effort —
+   * failures are logged, never thrown.
+   */
+  private async fanOutReminder(
+    aspirant: Aspirant,
+    context: ConstituencyContext,
+    template: Omit<Partial<Notification>, "userId">,
+  ) {
+    try {
+      if (!aspirant.electionId || !aspirant.constituencyId) {
+        return { created: 0 };
+      }
+      const recipients = await this.findRecipientUserIds(
+        context.electionType,
+        aspirant.constituencyId,
+        aspirant.userId,
+      );
+      return this.fanOut(recipients, {
+        aspirantId: aspirant.id,
+        aspirantName: aspirant.name,
+        electionId: aspirant.electionId,
+        constituencyId: aspirant.constituencyId,
+        constituencyName: context.constituencyName ?? null,
+        ...template,
+      });
+    } catch (err) {
+      this.logger.error(
+        `reminder fan-out (${template.type}) failed for aspirant ${aspirant.id}: ${(err as Error).message}`,
       );
       return { created: 0 };
     }

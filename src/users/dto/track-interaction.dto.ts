@@ -1,5 +1,5 @@
 import { ApiProperty } from "@nestjs/swagger";
-import { IsNumber } from "class-validator";
+import { IsNumber, IsOptional } from "class-validator";
 
 export class TrackInteractionDto {
   @ApiProperty({
@@ -8,4 +8,14 @@ export class TrackInteractionDto {
   })
   @IsNumber()
   aspirantId!: number;
+
+  @ApiProperty({
+    description:
+      "Click time as epoch milliseconds (recorded for phone/WhatsApp 'contact' presses). Defaults to now if omitted.",
+    example: 1780000000000,
+    required: false,
+  })
+  @IsOptional()
+  @IsNumber()
+  timestamp?: number;
 }

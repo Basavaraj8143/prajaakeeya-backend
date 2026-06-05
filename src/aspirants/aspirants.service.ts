@@ -19,6 +19,7 @@ import { MeetingResponse } from "./meeting-response.entity";
 import { VotesService } from "../votes/votes.service";
 import { ElectionsService } from "../elections/elections.service";
 import { ActivityRating } from "./activity-rating.entity";
+import { UserAspirantInteraction } from "../users/user-aspirant-interaction.entity";
 import { UpdateAspirantDto } from "./dto/update-aspirant.dto";
 import { User } from "../users/user.entity";
 import { NotificationsService } from "../notifications/notifications.service";
@@ -45,6 +46,8 @@ export class AspirantsService {
     private readonly meetingResponseRepo: Repository<MeetingResponse>,
     @InjectRepository(ActivityRating)
     private readonly activityRatingRepo: Repository<ActivityRating>,
+    @InjectRepository(UserAspirantInteraction)
+    private readonly interactionRepo: Repository<UserAspirantInteraction>,
     private readonly usersService: UsersService,
     private readonly wardsService: WardsService,
     private readonly electionsService: ElectionsService,
@@ -663,7 +666,7 @@ export class AspirantsService {
       allVisits,
       voteCounts,
       meetingCounts,
-      { meetingRatings, visitRatings, overallRatings },
+      { meetingRatings, visitRatings, contactRatings, overallRatings },
     ] = await Promise.all([
       this.visitRepo.find({
         where: { aspirantId: In(ids) },
@@ -704,6 +707,7 @@ export class AspirantsService {
         email: user?.email ?? null,
         voteCount: voteCounts[aspirant.id] ?? 0,
         overallRating: overallRatings[aspirant.id] ?? this.emptyRating(),
+        contactRating: contactRatings[aspirant.id] ?? this.emptyRating(),
         visits: visitsByAspirant[aspirant.id] ?? [],
         meetings: (aspirant.meetings || [])
           .sort((a: any, b: any) => b.startTime - a.startTime)
@@ -762,7 +766,7 @@ export class AspirantsService {
       allVisits,
       voteCounts,
       meetingCounts,
-      { meetingRatings, visitRatings, overallRatings },
+      { meetingRatings, visitRatings, contactRatings, overallRatings },
     ] = await Promise.all([
       this.visitRepo.find({
         where: { aspirantId: In(ids) },
@@ -778,13 +782,34 @@ export class AspirantsService {
 
     const userRatedMeetings = new Set<number>();
     const userRatedVisits = new Set<number>();
+    const userRatedContacts = new Set<number>(); // aspirantIds whose contact this user rated
     if (userId) {
       const userRatings = await this.activityRatingRepo.find({
         where: { voterId: userId, aspirantId: In(ids) },
       });
       for (const r of userRatings) {
         if (r.type === "meeting") userRatedMeetings.add(r.activityId);
-        else userRatedVisits.add(r.activityId);
+        else if (r.type === "visit") userRatedVisits.add(r.activityId);
+        else if (r.type === "contact") userRatedContacts.add(r.aspirantId);
+      }
+    }
+
+    // Aspirants this voter has contacted (pressed phone/WhatsApp) → eligible to
+    // rate their contact (until they've already rated). Keep the press time so
+    // the response can expose when the voter last contacted each aspirant.
+    const contactedAspirantIds = new Set<number>();
+    const contactedAtByAspirant = new Map<number, number | null>();
+    if (userId) {
+      const interactions = await this.interactionRepo.find({
+        where: { userId, aspirantId: In(ids), isPhoneCall: true },
+        select: ["aspirantId", "phoneCallAt"],
+      });
+      for (const i of interactions) {
+        contactedAspirantIds.add(i.aspirantId);
+        contactedAtByAspirant.set(
+          i.aspirantId,
+          i.phoneCallAt ? new Date(i.phoneCallAt).getTime() : null,
+        );
       }
     }
 
@@ -818,7 +843,7 @@ export class AspirantsService {
     return aspirants.map((aspirant) => {
       const { user, ...rest } = aspirant as any;
       const voteCount = voteCounts[aspirant.id] ?? 0;
-      return {
+      return this.applyContactPrivacy({
         ...rest,
         email: user?.email ?? null,
         voteCount,
@@ -827,6 +852,20 @@ export class AspirantsService {
             ? parseFloat(((voteCount / totalVotes) * 100).toFixed(1))
             : 0,
         overallRating: overallRatings[aspirant.id] ?? this.emptyRating(),
+        contactRating: contactRatings[aspirant.id] ?? this.emptyRating(),
+        ...(userId
+          ? {
+              isContactRated: userRatedContacts.has(aspirant.id),
+              // Show the "rate contact" prompt only to a voter who pressed this
+              // aspirant's phone/WhatsApp button and hasn't rated yet.
+              canRateContact:
+                contactedAspirantIds.has(aspirant.id) &&
+                !userRatedContacts.has(aspirant.id),
+              // When this voter last contacted the aspirant, as an epoch-ms
+              // timestamp (null if never contacted).
+              contactedAt: contactedAtByAspirant.get(aspirant.id) ?? null,
+            }
+          : {}),
         visits: visitsByAspirant[aspirant.id] ?? [],
         meetings: (aspirant.meetings || [])
           .sort((a: any, b: any) => b.startTime - a.startTime)
@@ -853,7 +892,7 @@ export class AspirantsService {
             return meetingData;
           }),
         documentStatus: aspirant.getDocumentStatus(),
-      };
+      });
     });
   }
 
@@ -878,7 +917,7 @@ export class AspirantsService {
     });
 
     const [
-      { meetingRatings, visitRatings, overallRatings },
+      { meetingRatings, visitRatings, contactRatings, overallRatings },
       meetingCounts,
       visitCounts,
     ] = await Promise.all([
@@ -964,7 +1003,7 @@ export class AspirantsService {
     }
 
     const { user: _user, ...aspirantRest } = aspirant as any;
-    return {
+    const result = {
       ...aspirantRest,
       isBlocked: aspirant.user?.isBlocked ?? false,
       electionName,
@@ -972,8 +1011,18 @@ export class AspirantsService {
       meetings: mappedMeetings,
       visits: mappedVisits,
       overallRating: overallRatings[id] ?? this.emptyRating(),
+      contactRating: contactRatings[id] ?? this.emptyRating(),
       documentStatus: aspirant.getDocumentStatus(),
     };
+
+    // The owner viewing their own profile always sees their full contact
+    // details (the FE profile screen relies on this); everyone else gets the
+    // privacy filter applied per the allow* flags.
+    const isOwner =
+      currentUser?.id != null &&
+      aspirant.userId != null &&
+      currentUser.id === aspirant.userId;
+    return isOwner ? result : this.applyContactPrivacy(result);
   }
 
   async setMeetingLink(
@@ -1308,6 +1357,21 @@ export class AspirantsService {
     return { data, total, page, limit, totalPages: Math.ceil(total / limit) };
   }
 
+  /**
+   * Privacy filter for outgoing aspirant responses. An aspirant controls who
+   * can see their contact details via the allow* flags: the phone number is
+   * only included when allowPhone is true, and the WhatsApp number only when
+   * allowWhatsapp is true. When a flag is false the corresponding field is
+   * removed entirely so the value never leaves the server. The allow* flags
+   * themselves are preserved so the client knows which contact actions to show.
+   */
+  private applyContactPrivacy<T extends Record<string, any>>(aspirant: T): T {
+    if (!aspirant) return aspirant;
+    if (aspirant.allowPhone === false) delete (aspirant as any).phone;
+    if (aspirant.allowWhatsapp === false) delete (aspirant as any).whatsappNumber;
+    return aspirant;
+  }
+
   private emptyDistribution(): Record<number, number> {
     return { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
   }
@@ -1404,6 +1468,7 @@ export class AspirantsService {
       voteCount: 5,
       votePercentage: 100,
       overallRating: demoOverallRating,
+      contactRating: demoOverallRating,
       documentStatus: "completed",
       visits: [
         {
@@ -1511,6 +1576,7 @@ export class AspirantsService {
     const emptyResult = {
       meetingRatings: {} as Record<number, any>,
       visitRatings: {} as Record<number, any>,
+      contactRatings: {} as Record<number, any>,
       overallRatings: {} as Record<number, any>,
     };
     if (!aspirantIds.length) return emptyResult;
@@ -1555,6 +1621,8 @@ export class AspirantsService {
 
     const meetingRatings: Record<number, any> = {};
     const visitRatings: Record<number, any> = {};
+    // Contact ratings are keyed by aspirantId (activityId === aspirantId).
+    const contactRatings: Record<number, any> = {};
     const overallSums: Record<
       number,
       { sum: number; count: number; distribution: Record<number, number> }
@@ -1570,7 +1638,8 @@ export class AspirantsService {
       };
 
       if (type === "meeting") meetingRatings[activityId] = entry;
-      else visitRatings[activityId] = entry;
+      else if (type === "visit") visitRatings[activityId] = entry;
+      else if (type === "contact") contactRatings[activityId] = entry;
 
       if (!overallSums[data.aspirantId])
         overallSums[data.aspirantId] = {
@@ -1597,7 +1666,7 @@ export class AspirantsService {
       };
     }
 
-    return { meetingRatings, visitRatings, overallRatings };
+    return { meetingRatings, visitRatings, contactRatings, overallRatings };
   }
 
   async rateMeeting(meetingId: number, voterId: number, rating: number) {
@@ -1642,6 +1711,48 @@ export class AspirantsService {
       });
     }
     return this.activityRatingRepo.save(existing);
+  }
+
+  /**
+   * Rate an aspirant's contact responsiveness (combined phone + WhatsApp), 1-5.
+   * Eligibility: the voter must have pressed this aspirant's phone/WhatsApp
+   * ("contact") button — i.e. an interaction with isPhoneCall=true exists.
+   * One-time: a contact rating cannot be changed once given. Stored as an
+   * ActivityRating with type "contact" and activityId = aspirantId.
+   */
+  async rateContact(aspirantId: number, voterId: number, rating: number) {
+    const aspirant = await this.repo.findOne({ where: { id: aspirantId } });
+    if (!aspirant) throw new NotFoundException("Aspirant not found");
+
+    // Eligibility — only a voter who has contacted this aspirant can rate.
+    const contacted = await this.interactionRepo.findOne({
+      where: { userId: voterId, aspirantId, isPhoneCall: true },
+    });
+    if (!contacted) {
+      throw new BadRequestException(
+        "You can rate an aspirant's contact only after contacting them via phone or WhatsApp.",
+      );
+    }
+
+    // One-time — a contact rating is final and cannot be changed.
+    const existing = await this.activityRatingRepo.findOne({
+      where: { type: "contact", activityId: aspirantId, voterId },
+    });
+    if (existing) {
+      throw new BadRequestException(
+        "You have already rated this aspirant's contact.",
+      );
+    }
+
+    return this.activityRatingRepo.save(
+      this.activityRatingRepo.create({
+        type: "contact",
+        activityId: aspirantId,
+        aspirantId,
+        voterId,
+        rating,
+      }),
+    );
   }
 
   async getActivityRatings(type: "meeting" | "visit", activityId: number) {

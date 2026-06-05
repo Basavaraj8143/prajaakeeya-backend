@@ -1,10 +1,12 @@
 import { Module } from "@nestjs/common";
-import { APP_GUARD } from "@nestjs/core";
+import { APP_GUARD, APP_FILTER } from "@nestjs/core";
+import { SentryModule, SentryGlobalFilter } from "@sentry/nestjs/setup";
 import { ConfigModule } from "@nestjs/config";
 import { TypeOrmModule } from "@nestjs/typeorm";
 import { ThrottlerModule, ThrottlerGuard } from "@nestjs/throttler";
 import { ThrottlerStorageRedisService } from "@nest-lab/throttler-storage-redis";
 import { CacheModule } from "@nestjs/cache-manager";
+import { ScheduleModule } from "@nestjs/schedule";
 import { createKeyv } from "@keyv/redis";
 import Redis from "ioredis";
 
@@ -65,7 +67,9 @@ import { GramaPanchayatModule } from "./grama-panchayat/grama-panchayat.module";
 import { GramaPanchayat } from "./grama-panchayat/grama-panchayat.entity";
 import { NotificationsModule } from "./notifications/notifications.module";
 import { Notification } from "./notifications/notification.entity";
+import { FcmToken } from "./notifications/fcm-token.entity";
 import { StatsModule } from "./stats/stats.module";
+import { RemindersModule } from "./reminders/reminders.module";
 
 // Build a Redis connection URL from REDIS_HOST + REDIS_PORT. Returns undefined
 // when REDIS_HOST is not set, so callers fall back to in-memory storage.
@@ -78,7 +82,12 @@ function resolveRedisUrl(): string | undefined {
 
 @Module({
   imports: [
+    // Sentry instrumentation (no-op unless SENTRY_DSN is set).
+    SentryModule.forRoot(),
     ConfigModule.forRoot({ isGlobal: true, validate }),
+
+    // Enables @Cron schedulers (meeting/visit reminders).
+    ScheduleModule.forRoot(),
 
     // Global rate limiting: configurable via env vars THROTTLE_TTL and THROTTLE_LIMIT.
     // Default: 200 requests per 60 seconds (bot protection).
@@ -192,6 +201,7 @@ function resolveRedisUrl(): string | undefined {
         Election,
         GramaPanchayat,
         Notification,
+        FcmToken,
       ],
     }),
 
@@ -215,12 +225,17 @@ function resolveRedisUrl(): string | undefined {
     GramaPanchayatModule,
     NotificationsModule,
     StatsModule,
+    RemindersModule,
     MediaModule,
   ],
   controllers: [HealthController],
   providers: [
     // Enforce rate limiting globally across all endpoints
     { provide: APP_GUARD, useClass: ThrottlerGuard },
+    // Report unhandled exceptions to Sentry (no-op unless SENTRY_DSN is set).
+    // MulterExceptionFilter (@Catch(MulterError), bound in main.ts) still takes
+    // precedence for upload errors.
+    { provide: APP_FILTER, useClass: SentryGlobalFilter },
   ],
 })
 export class AppModule {}

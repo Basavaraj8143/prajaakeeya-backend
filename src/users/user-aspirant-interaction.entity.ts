@@ -29,4 +29,9 @@ export class UserAspirantInteraction extends BaseEntity {
 
   @Column({ default: false })
   isPhoneCall!: boolean;
+
+  // When the voter last pressed the phone/WhatsApp ("contact") button for this
+  // aspirant. Set by the track/phone-call endpoint from the click timestamp.
+  @Column({ type: "timestamp", nullable: true })
+  phoneCallAt?: Date | null;
 }

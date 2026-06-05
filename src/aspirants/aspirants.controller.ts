@@ -21,6 +21,7 @@ import { CurrentUser } from "../common/decorators/current-user.decorator";
 import { Public } from "../common/decorators/public.decorator";
 import { Roles } from "../common/decorators/roles.decorator";
 import { JwtAuthGuard } from "../common/guards/jwt-auth.guard";
+import { OptionalJwtAuthGuard } from "../common/guards/optional-jwt-auth.guard";
 import { RolesGuard } from "../common/guards/roles.guard";
 import { AspirantsService } from "./aspirants.service";
 import { CreateAspirantDto } from "./dto/create-aspirant.dto";
@@ -153,7 +154,13 @@ export class AspirantsController {
 
   @Get(":id")
   @Public()
-  @ApiOperation({ summary: "Get aspirant details by id" })
+  @UseGuards(OptionalJwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Get aspirant details by id",
+    description:
+      "Public. If a valid token is supplied and the caller is the aspirant owner, their private contact details (phone/whatsapp) are included regardless of the allow* flags.",
+  })
   @ApiParam({
     name: "id",
     type: "number",
@@ -447,6 +454,31 @@ export class AspirantsController {
   ) {
     return this.aspirantsService.rateVisit(
       Number(visitId),
+      user.id,
+      dto.rating,
+    );
+  }
+
+  @Post(":aspirantId/contact/rate")
+  @UseGuards(JwtAuthGuard)
+  @ApiBearerAuth()
+  @ApiOperation({
+    summary: "Rate an aspirant's contact — phone + WhatsApp combined (1-5)",
+  })
+  @ApiParam({
+    name: "aspirantId",
+    type: "number",
+    description: "Aspirant ID",
+    example: 1,
+  })
+  @ApiResponse({ status: 201, description: "Contact rating saved" })
+  rateContact(
+    @CurrentUser() user: any,
+    @Param("aspirantId") aspirantId: string,
+    @Body() dto: RateActivityDto,
+  ) {
+    return this.aspirantsService.rateContact(
+      Number(aspirantId),
       user.id,
       dto.rating,
     );

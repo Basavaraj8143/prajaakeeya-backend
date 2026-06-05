@@ -7,6 +7,7 @@ import { AspirantVisit } from "./aspirant-visit.entity";
 import { VisitResponse } from "./visit-response.entity";
 import { MeetingResponse } from "./meeting-response.entity";
 import { ActivityRating } from "./activity-rating.entity";
+import { UserAspirantInteraction } from "../users/user-aspirant-interaction.entity";
 import { VotesModule } from "../votes/votes.module";
 import { AspirantsService } from "./aspirants.service";
 import { AspirantsController } from "./aspirants.controller";
@@ -25,6 +26,7 @@ import { NotificationsModule } from "../notifications/notifications.module";
       VisitResponse,
       MeetingResponse,
       ActivityRating,
+      UserAspirantInteraction,
     ]),
     UsersModule,
     WardsModule,
