@@ -3,6 +3,7 @@ dist
 uploads
 .env
 .env.*
+!.env.example
 .DS_Store
 firebase-test.html
 # Firebase service-account secrets (server-only — never commit)
