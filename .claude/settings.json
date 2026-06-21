@@ -1,9 +1,0 @@
-{
-  "permissions": {
-    "allow": [
-      "Bash(node -e \"console.log\\('test:e2e script:', require\\('./package.json'\\).scripts['test:e2e']||'MISSING'\\)\")",
-      "Bash(curl -s --max-time 10 \"https://api.prajaakeeya.org/api/elections\")",
-      "Bash(node -e ' *)"
-    ]
-  }
-}
